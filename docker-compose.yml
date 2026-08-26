@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: polyfollow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: polyfollow
+      POSTGRES_PASSWORD: polyfollow_secret_pwd
+      POSTGRES_DB: polyfollow_db
+    volumes:
+      - polyfollow_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polyfollow -d polyfollow_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polyfollow_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://polyfollow:polyfollow_secret_pwd@postgres:5432/polyfollow_db
+      - ENVIRONMENT=production
+      - POLLING_INTERVAL_SECONDS=30
+      - ENABLE_BACKGROUND_POLLER=true
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  polyfollow_pgdata:

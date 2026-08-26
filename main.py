@@ -1,12 +1,19 @@
 """
-Main entry point for Polymarket Bandar Tracker API.
-
-This module initializes and starts the FastAPI application.
+Main entry point for Polyfollow API.
 """
 
-from bandar_tracker import app
-
+import os
+import uvicorn
+from app.core.config import settings
 
 if __name__ == "__main__":
-    print("Starting Polymarket Bandar Tracker API...")
-    app.run("0.0.0.0:8000", reload=True)
+    port = int(os.getenv("PORT", "8000"))
+    host = os.getenv("HOST", "0.0.0.0")
+    print(f"Starting {settings.APP_NAME} on {host}:{port}...")
+    uvicorn.run(
+        "app.main:app",
+        host=host,
+        port=port,
+        reload=settings.DEBUG,
+        log_level="info",
+    )

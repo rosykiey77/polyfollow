@@ -1,1 +1,199 @@
-# Polyfollow
+# 🐋 Polyfollow - Polymarket Whale/Bandar Tracker & Smart Consensus Engine
+
+Backend service otomatis berbasis **Python 3.12+ (FastAPI + Async SQLAlchemy 2.0 + PostgreSQL)** untuk melacak aktivitas posisi, trade history, dan **Smart Signal Scoring (Whale Consensus)** di Polymarket secara real-time.
+
+Layanan ini dirancang khusus untuk menjadi **sumber data & sinyal berbobot tinggi (*high-conviction signals*)** yang siap dikonsumsi oleh **Hermes AI Agent** di VPS lain.
+
+---
+
+## 🚀 Fitur Utama
+
+- **Real-Time Data Ingestion**: Mengambil data posisi aktif dan trade history langsung dari Polymarket Data API.
+- **Embedded Async Background Poller**: Worker otomatis di dalam proses FastAPI dengan interval polling yang dapat disesuaikan.
+- **🧠 Smart Signal Scoring & Whale Consensus**:
+  - Mendeteksi konvergensi beberapa whale yang masuk ke outcome market yang sama.
+  - Formula Multi-Factor Confidence Scoring (0 - 100): *Whale Count Multiplier (40%) + Volume USD Weight (30%) + Win Rate Reputation (30%) - Conflict Penalty*.
+  - Multi-tier rolling timeframes: `1h` (Momentum), `6h`, `24h` (Akumulasi), dan `7d`.
+  - Structured **AI Rationale** deskriptif yang siap disuntikkan ke prompt Hermes LLM Agent.
+- **Signal Feed for Hermes Agent**: Feed transaksi whale yang belum dibaca (`unread_only=true`) dengan mekanisme `mark-read` untuk mencegah duplikasi sinyal.
+- **Async Database Layer**: PostgreSQL + SQLAlchemy 2.0 Async + asyncpg dengan migrasi skema otomatis menggunakan Alembic.
+- **Docker-Ready**: Dilengkapi `Dockerfile` dan `docker-compose.yml` untuk instalasi 1-klik di VPS.
+
+---
+
+## 🏗️ Struktur Arsitektur
+
+```
+polyfollow/
+├── alembic/                # Database migrations
+├── app/
+│   ├── api/
+│   │   └── v1/             # Router endpoints (/wallets, /positions, /trades, /signals, /stats)
+│   ├── core/
+│   │   ├── config.py       # Pydantic Settings (.env loader)
+│   │   ├── database.py     # SQLAlchemy Async engine & session
+│   │   └── logging.py      # Structured logging
+│   ├── models/             # SQLAlchemy ORM models (Wallet, Position, Trade, Snapshot)
+│   ├── schemas/            # Pydantic validation models (Request/Response DTO)
+│   ├── services/
+│   │   ├── polymarket.py   # Polymarket Data API client (httpx async)
+│   │   ├── tracker.py      # Business logic sinkronisasi & deteksi sinyal
+│   │   └── consensus.py    # Smart Signal Scoring & Whale Consensus Engine
+│   └── workers/
+│       └── poller.py       # Async background worker loop
+├── tests/                  # Test suite (pytest + pytest-asyncio)
+├── docker-compose.yml      # PostgreSQL + API orchestrator
+├── Dockerfile              # Container image
+├── requirements.txt        # Python dependencies
+├── .env.example            # Environment variables template
+└── main.py                 # Application entrypoint
+```
+
+---
+
+## 📡 REST API Reference (Untuk Hermes Agent)
+
+Dokumentasi interaktif OpenAPI/Swagger UI tersedia di `http://<IP_VPS>:8000/docs`.
+
+### 1. 🧠 Smart Signals & Whale Consensus (Rekomendasi Utama untuk Hermes Agent)
+- `GET /api/v1/signals/consensus?timeframe=24h&min_score=50&min_whales=2&limit=20`
+  Mengambil sinyal konsensus pintar dari pasar di mana para whale sepakat mengambil posisi yang sama.
+  
+  **Contoh Response:**
+  ```json
+  [
+    {
+      "condition_id": "0xabc123...",
+      "market_title": "Will Fed cut interest rates in June 2026?",
+      "market_slug": "fed-rate-cut-june-2026",
+      "consensus_outcome": "YES",
+      "confidence_score": 88.5,
+      "strength": "STRONG_CONSENSUS",
+      "whale_count": 2,
+      "total_volume_usdc": 21200.0,
+      "average_entry_price": 0.606,
+      "participating_whales": [
+        {
+          "address": "0xaaaa...aaaa",
+          "label": "Whale Alpha",
+          "side": "BUY",
+          "outcome": "YES",
+          "size_usdc": 15000.0,
+          "entry_price": 0.60,
+          "win_rate": 0.80,
+          "trade_count": 1
+        }
+      ],
+      "has_conflict": false,
+      "conflict_whale_count": 0,
+      "ai_rationale": "Strong Consensus: 2 tracked whale(s) entered YES with total volume $21,200.00 USDC (avg price 0.606). Historical average win rate is 75.0%. No conflicting whale positions detected in this window.",
+      "first_trade_at": "2026-08-26T18:00:00Z",
+      "last_trade_at": "2026-08-26T19:30:00Z"
+    }
+  ]
+  ```
+
+### 2. Feed Sinyal Trade Mentah (Raw Trades Feed)
+- `GET /api/v1/trades/feed?unread_only=true&limit=50`
+  Mengambil transaksi mentah whale yang belum diproses oleh Hermes Agent.
+- `POST /api/v1/trades/mark-read`
+  Menandai ID trade yang sudah diproses agar tidak dikirim ulang.
+  ```json
+  {
+    "trade_ids": ["c3a9f0f8-2831-482a-a92c-80a5bf296068"]
+  }
+  ```
+
+### 3. Manajemen Wallet Bandar
+- `GET /api/v1/wallets` : Menampilkan seluruh wallet yang dipantau.
+- `POST /api/v1/wallets` : Mendaftarkan wallet baru untuk dilacak (otomatis memicu initial sync).
+- `GET /api/v1/wallets/{address}` : Detail informasi wallet.
+- `DELETE /api/v1/wallets/{address}` : Menghapus wallet dari pelacakan.
+- `POST /api/v1/wallets/{address}/sync` : Memaksa sinkronisasi manual.
+
+### 4. Posisi Terbuka (Open Positions)
+- `GET /api/v1/positions` : Menampilkan seluruh posisi terbuka saat ini (`?wallet_address=0x...`).
+
+### 5. Statistik Performa & Health
+- `GET /api/v1/wallets/{address}/statistics` : Menampilkan statistik volume, win rate, dan PnL.
+- `GET /health` : Mengecek status service, koneksi database, dan status background poller.
+
+---
+
+## 💻 Panduan Pengembangan Lokal (Local Development)
+
+```bash
+# 1. Clone repository
+git clone https://github.com/your-username/polyfollow.git
+cd polyfollow
+
+# 2. Buat virtual environment
+uv venv
+source .venv/bin/activate
+
+# 3. Install dependensi
+uv pip install -r requirements.txt
+
+# 4. Salin template .env
+cp .env.example .env
+
+# 5. Jalankan migrasi database
+alembic upgrade head
+
+# 6. Jalankan automated test suite
+pytest -v
+
+# 7. Jalankan server lokal
+python main.py
+```
+Akses Swagger UI di: `http://localhost:8000/docs`
+
+---
+
+## 🌐 Panduan Langkah-demi-Langkah Install di VPS
+
+### Langkah 1: Install Docker di VPS
+```bash
+ssh root@<IP_VPS_ANDA>
+
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git curl ufw
+
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+```
+
+### Langkah 2: Clone & Jalankan via Docker Compose
+```bash
+cd /opt
+git clone <URL_REPO_POLYFOLLOW> polyfollow
+cd polyfollow
+
+cp .env.example .env
+docker compose up -d --build
+```
+
+### Langkah 3: Buka Port Firewall
+```bash
+sudo ufw allow 8000/tcp
+sudo ufw reload
+```
+
+### Langkah 4: Uji Coba dari VPS Hermes Agent
+```bash
+# Cek Smart Consensus Signals
+curl "http://<IP_VPS_POLYFOLLOW>:8000/api/v1/signals/consensus?timeframe=24h&min_score=50"
+```
+
+---
+
+## 🧪 Testing & Quality Assurance
+
+```bash
+pytest --cov=app -v
+```
+
+---
+
+## 📜 License
+MIT License
