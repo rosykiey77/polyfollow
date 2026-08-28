@@ -119,6 +119,35 @@ async def delete_wallet(address: str, db: AsyncSession = Depends(get_db)):
     return None
 
 
+@router.post("/discover")
+async def trigger_whale_discovery(
+    top_markets_limit: int = Query(10, ge=1, le=50, description="Number of top volume markets to scan"),
+    max_new_whales: int = Query(15, ge=1, le=50, description="Max newly discovered whale wallets to track"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Trigger automated discovery of active Polymarket whale/bandar wallets
+    from top prediction markets and recent large transactions.
+    """
+    discovered = await tracker_service.discover_and_register_whales(
+        db=db,
+        top_markets_limit=top_markets_limit,
+        max_new_whales=max_new_whales,
+    )
+    return {
+        "message": f"Discovery completed. Registered {len(discovered)} new whale wallets.",
+        "discovered_count": len(discovered),
+        "discovered_wallets": discovered,
+    }
+
+
+@router.post("/seed")
+async def seed_wallets(db: AsyncSession = Depends(get_db)):
+    """Seed initial curated top whale wallets into the database."""
+    seeded = await tracker_service.seed_initial_wallets(db)
+    return {"message": f"Seeding completed. Seeded {seeded} wallets.", "seeded_count": seeded}
+
+
 @router.post("/{address}/sync")
 async def sync_wallet_now(address: str, db: AsyncSession = Depends(get_db)):
     """Manually trigger immediate sync for a specific wallet."""

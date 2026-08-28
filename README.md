@@ -104,9 +104,11 @@ Dokumentasi interaktif OpenAPI/Swagger UI tersedia di `http://<IP_VPS>:8000/docs
   }
   ```
 
-### 3. Manajemen Wallet Bandar
+### 3. Manajemen & Auto-Discovery Wallet Bandar
 - `GET /api/v1/wallets` : Menampilkan seluruh wallet yang dipantau.
 - `POST /api/v1/wallets` : Mendaftarkan wallet baru untuk dilacak (otomatis memicu initial sync).
+- `POST /api/v1/wallets/discover` : Memicu auto-discovery otomatis whale/bandar dari top markets dan recent trades.
+- `POST /api/v1/wallets/seed` : Melakukan re-seeding manual daftar curated top whale wallets.
 - `GET /api/v1/wallets/{address}` : Detail informasi wallet.
 - `DELETE /api/v1/wallets/{address}` : Menghapus wallet dari pelacakan.
 - `POST /api/v1/wallets/{address}/sync` : Memaksa sinkronisasi manual.

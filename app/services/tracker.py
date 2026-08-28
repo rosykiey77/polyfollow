@@ -10,10 +10,147 @@ from app.models.trade import Trade
 from app.models.wallet import Wallet
 from app.services.polymarket import PolymarketClient, polymarket_client
 
+# Top known active Polymarket whale/bandar wallets to seed on clean start
+INITIAL_SEED_WALLETS = [
+    {
+        "address": "0x674887d1ac838099a48b629dff53f25b7b87ee08",
+        "label": "Whale Alpha (High Volume Trader)",
+    },
+    {
+        "address": "0x31c7cb5562c1ff3603326fcb880b61483f511375",
+        "label": "Whale Fresh-Lilac (Active Macro Bandar)",
+    },
+    {
+        "address": "0xdb5ad26b68d77ae966d29e7180147272ab7a3965",
+        "label": "Whale 0xDB5 (Top Accumulator)",
+    },
+    {
+        "address": "0x2a69660046d7acc4ab204d7cc5ba78b0776cd2f7",
+        "label": "Whale UpTheBlues (Market Mover)",
+    },
+    {
+        "address": "0x2117ae94a97d69b78cbc81b6680a62deb1955c26",
+        "label": "Whale Zzzz87 (High Conviction Bandar)",
+    },
+    {
+        "address": "0xbd15da853ba1d19cc7af11f4011c6d03e2dc5f62",
+        "label": "Whale Swift-Trader (Crypto / BTC Bandar)",
+    },
+]
+
 
 class TrackerService:
     def __init__(self, client: PolymarketClient = polymarket_client):
         self.client = client
+
+    async def seed_initial_wallets(self, db: AsyncSession, force: bool = False) -> int:
+        """Seed default top whale wallets if the wallet table is empty or force=True."""
+        result = await db.execute(select(func.count(Wallet.address)))
+        count = result.scalar_one_or_none() or 0
+        if count > 0 and not force:
+            return 0
+
+        existing_res = await db.execute(select(Wallet.address))
+        existing_addrs = {row[0] for row in existing_res.fetchall()}
+
+        logger.info("Seeding initial top Polymarket whale wallets...")
+        seeded = 0
+        for w in INITIAL_SEED_WALLETS:
+            addr = w["address"].strip().lower()
+            if addr not in existing_addrs:
+                wallet = Wallet(address=addr, label=w["label"], is_active=True)
+                db.add(wallet)
+                existing_addrs.add(addr)
+                seeded += 1
+
+        if seeded > 0:
+            await db.commit()
+            logger.info("Successfully seeded %d whale wallets.", seeded)
+        return seeded
+
+    async def discover_and_register_whales(
+        self,
+        db: AsyncSession,
+        top_markets_limit: int = 10,
+        max_new_whales: int = 15,
+    ) -> list[dict[str, Any]]:
+        """
+        Dynamically discover active bandar/whale wallets from Polymarket:
+        1. Top volume prediction markets (Gamma API) -> Top Holders (Data API)
+        2. Real-time high volume trades (Data API)
+        Automatically registers new wallets and triggers initial sync.
+        """
+        logger.info("Running automated Whale/Bandar discovery on Polymarket...")
+        discovered_candidates: dict[str, str] = {}
+
+        # 1. Discover from top volume markets & their holders
+        try:
+            top_markets = await self.client.get_top_markets(limit=top_markets_limit)
+            for market in top_markets:
+                cid = market.get("conditionId")
+                title = market.get("question") or market.get("title") or "Market"
+                if not cid:
+                    continue
+                holders = await self.client.get_market_holders(cid)
+                for h in holders[:5]:  # Top 5 holders per market
+                    addr = h.get("proxyWallet") or h.get("user")
+                    if addr and len(addr) == 42 and addr.startswith("0x"):
+                        clean_addr = addr.strip().lower()
+                        label_name = h.get("name") or h.get("pseudonym") or f"Bandar ({title[:25]}...)"
+                        if clean_addr not in discovered_candidates:
+                            discovered_candidates[clean_addr] = str(label_name)
+        except Exception as e:
+            logger.warning("Error fetching top market holders during discovery: %s", str(e))
+
+        # 2. Discover from recent trades
+        try:
+            recent_trades = await self.client.get_recent_trades(limit=50)
+            for trade in recent_trades:
+                addr = trade.get("proxyWallet") or trade.get("user")
+                size = float(trade.get("size") or 0.0)
+                price = float(trade.get("price") or 0.0)
+                usdc_val = float(trade.get("usdcSize") or (size * price))
+                if addr and len(addr) == 42 and addr.startswith("0x") and usdc_val >= 20.0:
+                    clean_addr = addr.strip().lower()
+                    title = trade.get("title") or "Trade"
+                    label_name = trade.get("name") or trade.get("pseudonym") or f"Whale Trader ({title[:25]}...)"
+                    if clean_addr not in discovered_candidates:
+                        discovered_candidates[clean_addr] = str(label_name)
+        except Exception as e:
+            logger.warning("Error fetching recent trades during discovery: %s", str(e))
+
+        if not discovered_candidates:
+            logger.info("No new whale candidates discovered.")
+            return []
+
+        # Check existing wallets in DB
+        existing_res = await db.execute(select(Wallet.address))
+        existing_addresses = {row[0] for row in existing_res.fetchall()}
+
+        newly_registered: list[dict[str, Any]] = []
+        for addr, label in discovered_candidates.items():
+            if addr in existing_addresses:
+                continue
+            if len(newly_registered) >= max_new_whales:
+                break
+
+            wallet = Wallet(address=addr, label=label, is_active=True)
+            db.add(wallet)
+            newly_registered.append({"address": addr, "label": label})
+
+        if newly_registered:
+            await db.commit()
+            logger.info("Discovered and registered %d new whale wallets!", len(newly_registered))
+            # Sync each newly registered wallet immediately
+            for item in newly_registered:
+                try:
+                    await self.sync_wallet(db, item["address"])
+                except Exception as sync_err:
+                    logger.warning("Initial sync error for newly discovered wallet %s: %s", item["address"], str(sync_err))
+        else:
+            logger.info("All %d discovered whales are already tracked.", len(discovered_candidates))
+
+        return newly_registered
 
     async def sync_wallet_positions(self, db: AsyncSession, wallet_address: str) -> int:
         """Fetch active positions from Polymarket and replace current DB positions."""
@@ -184,9 +321,16 @@ class TrackerService:
         }
 
     async def sync_all_active_wallets(self, db: AsyncSession) -> list[dict[str, Any]]:
-        """Fetch all active wallets and synchronize each."""
+        """Fetch all active wallets and synchronize each. Auto-seeds if empty."""
         result = await db.execute(select(Wallet.address).where(Wallet.is_active.is_(True)))
         active_addresses = [row[0] for row in result.fetchall()]
+
+        # If no active wallets exist, seed initial top whales
+        if not active_addresses:
+            await self.seed_initial_wallets(db)
+            result = await db.execute(select(Wallet.address).where(Wallet.is_active.is_(True)))
+            active_addresses = [row[0] for row in result.fetchall()]
+
         results = []
         for address in active_addresses:
             try:

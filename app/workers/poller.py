@@ -16,23 +16,43 @@ class BackgroundPoller:
 
     async def _poller_loop(self):
         logger.info(
-            "Polymarket Background Poller started (interval: %ds)",
+            "Polymarket Background Poller started (interval: %ds, auto-discovery: %s)",
             settings.POLLING_INTERVAL_SECONDS,
+            settings.ENABLE_AUTO_DISCOVERY,
         )
         self.is_running = True
+
+        # Initial seed & discovery on startup
+        try:
+            async with async_session_factory() as session:
+                await tracker_service.seed_initial_wallets(session)
+                if settings.ENABLE_AUTO_DISCOVERY:
+                    await tracker_service.discover_and_register_whales(session)
+        except Exception as startup_err:
+            logger.warning("Error during initial poller startup discovery: %s", str(startup_err))
+
         while self.is_running:
             try:
                 self.last_run_time = datetime.datetime.now(datetime.timezone.utc)
                 async with async_session_factory() as session:
+                    # Periodically run whale discovery
+                    if settings.ENABLE_AUTO_DISCOVERY and (self.total_runs > 0) and (self.total_runs % settings.AUTO_DISCOVERY_INTERVAL_RUNS == 0):
+                        try:
+                            await tracker_service.discover_and_register_whales(session)
+                        except Exception as disc_err:
+                            logger.warning("Error during periodic whale discovery: %s", str(disc_err))
+
                     sync_results = await tracker_service.sync_all_active_wallets(session)
                     self.total_runs += 1
                     total_new_trades = sum(r.get("new_trades_detected", 0) for r in sync_results)
-                    if total_new_trades > 0:
-                        logger.info(
-                            "Poller iteration complete: %d wallets synced, %d new trades detected!",
-                            len(sync_results),
-                            total_new_trades,
-                        )
+                    total_positions = sum(r.get("positions_synced", 0) for r in sync_results)
+                    logger.info(
+                        "Poller cycle #%d complete: %d active wallets synced, %d total positions, %d new trades detected.",
+                        self.total_runs,
+                        len(sync_results),
+                        total_positions,
+                        total_new_trades,
+                    )
             except asyncio.CancelledError:
                 logger.info("Background Poller received cancellation signal.")
                 break

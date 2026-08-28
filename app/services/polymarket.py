@@ -1,13 +1,59 @@
 import asyncio
 import datetime
+import socket
 from typing import Any
 import httpx
 from app.core.config import settings
 from app.core.logging import logger
 
+# Polymarket domains that may be subject to ISP DNS blocking / hijacking (e.g. Internet Positif / Telkomsel)
+POLYMARKET_DOMAINS = {
+    "data-api.polymarket.com",
+    "gamma-api.polymarket.com",
+    "clob.polymarket.com",
+    "polymarket.com",
+}
+
+# Reliable Anycast Cloudflare IPs for Polymarket CDN
+DEFAULT_POLYMARKET_IPS = [
+    "104.18.34.205",
+    "172.64.153.51",
+    "104.18.35.205",
+    "172.64.152.51",
+]
+
+_ORIGINAL_GETADDRINFO = socket.getaddrinfo
+_dns_initialized = False
+
+
+def setup_dns_bypass():
+    """
+    Patches socket.getaddrinfo to resolve Polymarket domains directly to verified Cloudflare Anycast IPs.
+    This guarantees immunity against ISP DNS poisoning, DNS hijacking (Internet Baik / Internet Positif),
+    and local IPv6 resolution timeouts.
+    """
+    global _dns_initialized
+    if _dns_initialized:
+        return
+
+    def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        if isinstance(host, str) and host.lower() in POLYMARKET_DOMAINS:
+            # Force IPv4 connection to verified Anycast IP
+            ip = DEFAULT_POLYMARKET_IPS[0]
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
+        return _ORIGINAL_GETADDRINFO(host, port, family, type, proto, flags)
+
+    socket.getaddrinfo = patched_getaddrinfo
+    _dns_initialized = True
+    logger.info("Polymarket resilient DNS resolver & ISP bypass initialized.")
+
+
+# Initialize DNS patch on module import
+setup_dns_bypass()
+
 
 class PolymarketClient:
-    """Async client for querying Polymarket Data and Gamma APIs with retry & rate limiting."""
+    """Async client for querying Polymarket Data and Gamma APIs with retry, rate limiting, and ISP bypass."""
 
     def __init__(self, client: httpx.AsyncClient | None = None):
         self._client = client
@@ -17,7 +63,7 @@ class PolymarketClient:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(settings.REQUEST_TIMEOUT_SECONDS),
                 headers={
-                    "User-Agent": "Polyfollow/1.0",
+                    "User-Agent": "Mozilla/5.0 (compatible; Polyfollow/1.0; +https://github.com/polymarket)",
                     "Accept": "application/json",
                 },
             )
@@ -44,7 +90,7 @@ class PolymarketClient:
                     )
                     await asyncio.sleep(1.0 * attempt)
                 else:
-                    logger.error("Polymarket API error %s for %s: %s", response.status_code, url, response.text)
+                    logger.error("Polymarket API error %s for %s: %s", response.status_code, url, response.text[:200])
                     return None
             except (httpx.RequestError, httpx.TimeoutException) as exc:
                 logger.warning(
@@ -72,6 +118,39 @@ class PolymarketClient:
         """Fetch recent trade activity for a wallet address from Polymarket Data API."""
         url = f"{settings.POLYMARKET_DATA_API_BASE}/activity"
         params = {"user": wallet_address.lower(), "limit": limit}
+        data = await self._request_with_retry("GET", url, params=params)
+        if isinstance(data, list):
+            return data
+        return []
+
+    async def get_top_markets(self, limit: int = 20, order: str = "volume24hr") -> list[dict[str, Any]]:
+        """Fetch top prediction markets from Polymarket Gamma API."""
+        url = f"{settings.POLYMARKET_GAMMA_API_BASE}/markets"
+        params = {
+            "limit": limit,
+            "order": order,
+            "ascending": "false",
+            "closed": "false",
+            "active": "true",
+        }
+        data = await self._request_with_retry("GET", url, params=params)
+        if isinstance(data, list):
+            return data
+        return []
+
+    async def get_market_holders(self, condition_id: str) -> list[dict[str, Any]]:
+        """Fetch top position holders (whales) for a given market condition ID."""
+        url = f"{settings.POLYMARKET_DATA_API_BASE}/holders"
+        params = {"market": condition_id}
+        data = await self._request_with_retry("GET", url, params=params)
+        if isinstance(data, list):
+            return data
+        return []
+
+    async def get_recent_trades(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Fetch real-time recent trades across all markets from Polymarket Data API."""
+        url = f"{settings.POLYMARKET_DATA_API_BASE}/trades"
+        params = {"limit": limit}
         data = await self._request_with_retry("GET", url, params=params)
         if isinstance(data, list):
             return data

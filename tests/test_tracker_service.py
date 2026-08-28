@@ -81,3 +81,31 @@ async def test_tracker_sync_flow(db_session: AsyncSession):
     # 5. Run sync again with same activity -> new_trades_detected should be 0 (deduplication)
     res_2 = await tracker.sync_wallet(db_session, test_addr)
     assert res_2["new_trades_detected"] == 0
+
+
+@pytest.mark.asyncio
+async def test_tracker_seed_and_discover(db_session: AsyncSession):
+    mock_client = PolymarketClient()
+    mock_client.get_top_markets = AsyncMock(return_value=[
+        {"conditionId": "cond_m1", "question": "Who wins?", "volume24hr": 50000.0}
+    ])
+    mock_client.get_market_holders = AsyncMock(return_value=[
+        {"proxyWallet": "0x8888888888888888888888888888888888888888", "name": "Whale Boss"}
+    ])
+    mock_client.get_recent_trades = AsyncMock(return_value=[
+        {"proxyWallet": "0x9999999999999999999999999999999999999999", "name": "Whale Quick", "size": 1000, "price": 0.5, "usdcSize": 500}
+    ])
+    mock_client.get_user_positions = AsyncMock(return_value=[])
+    mock_client.get_user_activity = AsyncMock(return_value=[])
+
+    tracker = TrackerService(client=mock_client)
+
+    # 1. Test seed_initial_wallets
+    seeded = await tracker.seed_initial_wallets(db_session, force=True)
+    assert seeded > 0
+
+    # 2. Test discover_and_register_whales
+    discovered = await tracker.discover_and_register_whales(db_session, top_markets_limit=1, max_new_whales=5)
+    assert len(discovered) == 2
+    assert any(d["address"] == "0x8888888888888888888888888888888888888888" for d in discovered)
+    assert any(d["address"] == "0x9999999999999999999999999999999999999999" for d in discovered)

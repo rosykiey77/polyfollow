@@ -57,3 +57,16 @@ async def test_wallet_crud_lifecycle(async_client: AsyncClient):
     # 8. Verify deleted
     not_found_res = await async_client.get(f"/api/v1/wallets/{valid_address}")
     assert not_found_res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_wallet_seed_and_discover(async_client: AsyncClient):
+    # Test seed endpoint
+    seed_res = await async_client.post("/api/v1/wallets/seed")
+    assert seed_res.status_code == 200
+    assert "seeded_count" in seed_res.json()
+
+    # Test discover endpoint
+    disc_res = await async_client.post("/api/v1/wallets/discover?top_markets_limit=2&max_new_whales=5")
+    assert disc_res.status_code == 200
+    assert "discovered_count" in disc_res.json()
