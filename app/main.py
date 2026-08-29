@@ -47,6 +47,10 @@ app.add_middleware(
 # Root health check endpoint
 app.include_router(health_router)
 
+# Web Dashboard endpoint (/dashboard)
+from app.api.v1.dashboard import router as dashboard_router
+app.include_router(dashboard_router)
+
 # API v1 endpoints
 app.include_router(api_v1_router)
 
@@ -56,6 +60,7 @@ async def root():
     return {
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
+        "dashboard": "/dashboard",
         "docs": "/docs",
         "health": "/health",
         "api_v1": "/api/v1",

@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polyfollow - Polymarket Bandar Intelligence Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        },
+                        dark: {
+                            bg: '#0b0f19',
+                            card: '#111827',
+                            border: '#1f2937',
+                            hover: '#1e293b'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background-color: #0b0f19; color: #f3f4f6; font-family: system-ui, -apple-system, sans-serif; }
+        .badge-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .glass-card { background: rgba(17, 24, 39, 0.85); backdrop-filter: blur(8px); border: 1px solid #1f2937; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0b0f19; }
+        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Header Navigation -->
+    <header class="border-b border-gray-800 bg-dark-card/90 sticky top-0 z-40 backdrop-blur">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-emerald-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <span class="text-2xl">🐋</span>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-lg font-bold tracking-tight text-white">POLYFOLLOW</h1>
+                        <span class="text-xs font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">v1.0.0</span>
+                    </div>
+                    <p class="text-xs text-gray-400">Polymarket Bandar Intelligence & Consensus Engine</p>
+                </div>
+            </div>
+
+            <!-- Header Status & Actions -->
+            <div class="flex items-center gap-3">
+                <!-- Poller Status Badge -->
+                <div id="poller-status" class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 badge-pulse"></span>
+                    <span>Poller Active</span>
+                </div>
+
+                <!-- Quick Action Buttons -->
+                <button onclick="triggerDiscovery()" id="btn-discover" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow transition active:scale-95">
+                    <i data-lucide="radar" class="w-4 h-4"></i>
+                    <span>Discover Whales</span>
+                </button>
+                <button onclick="openAddWalletModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-medium border border-gray-700 transition">
+                    <i data-lucide="plus-circle" class="w-4 h-4 text-indigo-400"></i>
+                    <span class="hidden md:inline">Track Wallet</span>
+                </button>
+                <button onclick="testWebhook()" title="Test Hermes Webhook" class="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-amber-400 border border-gray-700 transition">
+                    <i data-lucide="send" class="w-4 h-4"></i>
+                </button>
+                <a href="/docs" target="_blank" class="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-gray-700 transition" title="Open Swagger API Docs">
+                    <i data-lucide="file-code" class="w-4 h-4"></i>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <!-- Top Metrics Cards Grid -->
+        <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <!-- Metric 1: Tracked Whales -->
+            <div class="glass-card rounded-xl p-4 flex flex-col justify-between hover:border-gray-700 transition">
+                <div class="flex items-center justify-between text-gray-400 text-xs">
+                    <span>TRACKED WHALES</span>
+                    <i data-lucide="users" class="w-4 h-4 text-indigo-400"></i>
+                </div>
+                <div class="mt-2 flex items-baseline gap-2">
+                    <span id="metric-wallets" class="text-2xl font-black text-white font-mono">-</span>
+                    <span class="text-xs text-gray-400">active</span>
+                </div>
+            </div>
+
+            <!-- Metric 2: Smart Consensus Alpha -->
+            <div class="glass-card rounded-xl p-4 flex flex-col justify-between hover:border-gray-700 transition">
+                <div class="flex items-center justify-between text-gray-400 text-xs">
+                    <span>HIGH CONVICTION SIGNALS</span>
+                    <i data-lucide="zap" class="w-4 h-4 text-amber-400"></i>
+                </div>
+                <div class="mt-2 flex items-baseline gap-2">
+                    <span id="metric-signals" class="text-2xl font-black text-amber-400 font-mono">-</span>
+                    <span class="text-xs text-gray-400">opportunities</span>
+                </div>
+            </div>
+
+            <!-- Metric 3: Open Whale Positions -->
+            <div class="glass-card rounded-xl p-4 flex flex-col justify-between hover:border-gray-700 transition">
+                <div class="flex items-center justify-between text-gray-400 text-xs">
+                    <span>MONITORED POSITIONS</span>
+                    <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i>
+                </div>
+                <div class="mt-2 flex items-baseline gap-2">
+                    <span id="metric-positions" class="text-2xl font-black text-emerald-400 font-mono">-</span>
+                    <span class="text-xs text-gray-400">live</span>
+                </div>
+            </div>
+
+            <!-- Metric 4: System Uptime -->
+            <div class="glass-card rounded-xl p-4 flex flex-col justify-between hover:border-gray-700 transition">
+                <div class="flex items-center justify-between text-gray-400 text-xs">
+                    <span>SYSTEM HEALTH</span>
+                    <i data-lucide="activity" class="w-4 h-4 text-blue-400"></i>
+                </div>
+                <div class="mt-2 flex items-baseline gap-2">
+                    <span id="metric-health" class="text-sm font-bold text-emerald-400 font-mono">100% ONLINE</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Navigation Tabs -->
+        <div class="border-b border-gray-800 flex items-center justify-between">
+            <nav class="flex space-x-6">
+                <button onclick="switchTab('signals')" id="tab-btn-signals" class="pb-3 text-sm font-semibold text-indigo-400 border-b-2 border-indigo-500 flex items-center gap-2">
+                    <i data-lucide="cpu" class="w-4 h-4"></i>
+                    <span>Smart Consensus Alpha</span>
+                </button>
+                <button onclick="switchTab('trades')" id="tab-btn-trades" class="pb-3 text-sm font-medium text-gray-400 hover:text-gray-200 border-b-2 border-transparent flex items-center gap-2">
+                    <i data-lucide="trending-up" class="w-4 h-4"></i>
+                    <span>Live Whale Feed</span>
+                </button>
+                <button onclick="switchTab('wallets')" id="tab-btn-wallets" class="pb-3 text-sm font-medium text-gray-400 hover:text-gray-200 border-b-2 border-transparent flex items-center gap-2">
+                    <i data-lucide="shield-check" class="w-4 h-4"></i>
+                    <span>Whale Profiles & Management</span>
+                </button>
+            </nav>
+
+            <!-- Refresh button & Auto Refresh indicator -->
+            <div class="flex items-center gap-2 pb-2">
+                <span class="text-xs text-gray-400 hidden sm:inline" id="last-updated-text">Updating...</span>
+                <button onclick="refreshCurrentTab(true)" id="btn-refresh" class="p-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 transition" title="Refresh Now">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- TAB 1: SMART CONSENSUS ALPHA SIGNALS -->
+        <section id="tab-signals" class="space-y-4">
+            <!-- Filter Bar -->
+            <div class="flex flex-wrap items-center justify-between gap-3 bg-dark-card p-3 rounded-xl border border-gray-800">
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-gray-400 font-medium">Timeframe:</span>
+                    <div class="flex rounded-lg bg-gray-900 p-1 border border-gray-800 text-xs">
+                        <button onclick="setTimeframe('1h')" id="tf-1h" class="px-2.5 py-1 rounded font-medium text-gray-400 hover:text-white">1h</button>
+                        <button onclick="setTimeframe('6h')" id="tf-6h" class="px-2.5 py-1 rounded font-medium text-gray-400 hover:text-white">6h</button>
+                        <button onclick="setTimeframe('24h')" id="tf-24h" class="px-2.5 py-1 rounded font-medium bg-indigo-600 text-white shadow">24h</button>
+                        <button onclick="setTimeframe('7d')" id="tf-7d" class="px-2.5 py-1 rounded font-medium text-gray-400 hover:text-white">7d</button>
+                    </div>
+                </div>
+                <div class="text-xs text-gray-400 flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+                    <span>Multi-factor confidence scoring ready for Hermes LLM</span>
+                </div>
+            </div>
+
+            <!-- Signals Feed Container -->
+            <div id="signals-container" class="space-y-3">
+                <div class="text-center py-12 text-gray-500">
+                    <i data-lucide="loader" class="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-400"></i>
+                    <p class="text-sm">Calculating whale consensus...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: LIVE WHALE TRADES FEED -->
+        <section id="tab-trades" class="hidden space-y-4">
+            <div class="glass-card rounded-xl border border-gray-800 overflow-hidden">
+                <div class="p-4 border-b border-gray-800 flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+                        <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i>
+                        <span>Recent Raw Whale Trades</span>
+                    </h3>
+                    <span class="text-xs text-gray-400">Real-time Polymarket data stream</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-gray-300">
+                        <thead class="bg-gray-900/80 text-gray-400 uppercase font-mono text-[10px] border-b border-gray-800">
+                            <tr>
+                                <th class="p-3">Time</th>
+                                <th class="p-3">Whale / Bandar</th>
+                                <th class="p-3">Market</th>
+                                <th class="p-3">Outcome</th>
+                                <th class="p-3">Volume (USDC)</th>
+                                <th class="p-3">Price</th>
+                                <th class="p-3 text-right">Tx / Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-table-body" class="divide-y divide-gray-800/60 font-mono">
+                            <tr>
+                                <td colspan="7" class="text-center py-8 text-gray-500 font-sans">Loading trade feed...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: WHALE PROFILES & MANAGEMENT -->
+        <section id="tab-wallets" class="hidden space-y-4">
+            <div class="glass-card rounded-xl border border-gray-800 overflow-hidden">
+                <div class="p-4 border-b border-gray-800 flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-semibold text-white">Tracked Whale Wallets</h3>
+                        <p class="text-xs text-gray-400">Curated & Auto-Discovered Polymarket Smart Money</p>
+                    </div>
+                    <button onclick="openAddWalletModal()" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5">
+                        <i data-lucide="plus" class="w-4 h-4"></i>
+                        <span>Add Wallet</span>
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-gray-300">
+                        <thead class="bg-gray-900/80 text-gray-400 uppercase font-mono text-[10px] border-b border-gray-800">
+                            <tr>
+                                <th class="p-3">Address & Label</th>
+                                <th class="p-3">Archetype</th>
+                                <th class="p-3">Conviction Tier</th>
+                                <th class="p-3">Status</th>
+                                <th class="p-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wallets-table-body" class="divide-y divide-gray-800/60">
+                            <tr>
+                                <td colspan="5" class="text-center py-8 text-gray-500 font-sans">Loading wallets...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Add Wallet Modal -->
+    <div id="modal-add-wallet" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    <i data-lucide="plus-circle" class="w-5 h-5 text-indigo-400"></i>
+                    <span>Track New Whale Wallet</span>
+                </h3>
+                <button onclick="closeAddWalletModal()" class="text-gray-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <form onsubmit="submitAddWallet(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Ethereum/Polygon Wallet Address *</label>
+                    <input type="text" id="input-wallet-address" required placeholder="0x..." class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Label / Bandar Name (Optional)</label>
+                    <input type="text" id="input-wallet-label" placeholder="e.g. Whale Alpha (Macro Trader)" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeAddWalletModal()" class="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium">Cancel</button>
+                    <button type="submit" id="btn-submit-wallet" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow">Add & Sync</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- JavaScript Controller -->
+    <script>
+        let currentTab = 'signals';
+        let currentTimeframe = '24h';
+        let refreshInterval = null;
+
+        // Initialize Dashboard
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            fetchMetrics();
+            loadSignals();
+            // Start 15s auto-refresh
+            refreshInterval = setInterval(() => {
+                refreshCurrentTab(false);
+            }, 15000);
+        });
+
+        // Tab Switching
+        function switchTab(tab) {
+            currentTab = tab;
+            ['signals', 'trades', 'wallets'].forEach(t => {
+                const el = document.getElementById(`tab-${t}`);
+                const btn = document.getElementById(`tab-btn-${t}`);
+                if (t === tab) {
+                    el.classList.remove('hidden');
+                    btn.classList.add('text-indigo-400', 'border-indigo-500');
+                    btn.classList.remove('text-gray-400', 'border-transparent');
+                } else {
+                    el.classList.add('hidden');
+                    btn.classList.remove('text-indigo-400', 'border-indigo-500');
+                    btn.classList.add('text-gray-400', 'border-transparent');
+                }
+            });
+            refreshCurrentTab(true);
+        }
+
+        function setTimeframe(tf) {
+            currentTimeframe = tf;
+            ['1h', '6h', '24h', '7d'].forEach(t => {
+                const b = document.getElementById(`tf-${t}`);
+                if (t === tf) {
+                    b.className = 'px-2.5 py-1 rounded font-medium bg-indigo-600 text-white shadow';
+                } else {
+                    b.className = 'px-2.5 py-1 rounded font-medium text-gray-400 hover:text-white';
+                }
+            });
+            loadSignals();
+        }
+
+        function refreshCurrentTab(manual = false) {
+            if (manual) {
+                const btn = document.getElementById('btn-refresh');
+                btn.classList.add('animate-spin');
+                setTimeout(() => btn.classList.remove('animate-spin'), 600);
+            }
+            fetchMetrics();
+            if (currentTab === 'signals') loadSignals();
+            else if (currentTab === 'trades') loadTrades();
+            else if (currentTab === 'wallets') loadWallets();
+            
+            document.getElementById('last-updated-text').textContent = 'Updated ' + new Date().toLocaleTimeString();
+        }
+
+        // Fetch Overview Metrics
+        async function fetchMetrics() {
+            try {
+                const [healthRes, walletsRes, signalsRes, posRes] = await Promise.all([
+                    fetch('/health'),
+                    fetch('/api/v1/wallets'),
+                    fetch('/api/v1/signals/consensus?min_score=0&limit=100'),
+                    fetch('/api/v1/positions')
+                ]);
+
+                if (healthRes.ok) {
+                    const health = await healthRes.json();
+                    document.getElementById('metric-health').textContent = health.status === 'healthy' ? '100% ONLINE' : 'DEGRADED';
+                }
+                if (walletsRes.ok) {
+                    const wallets = await walletsRes.json();
+                    document.getElementById('metric-wallets').textContent = wallets.length;
+                }
+                if (signalsRes.ok) {
+                    const signals = await signalsRes.json();
+                    document.getElementById('metric-signals').textContent = signals.length;
+                }
+                if (posRes.ok) {
+                    const positions = await posRes.json();
+                    document.getElementById('metric-positions').textContent = positions.length;
+                }
+            } catch (err) {
+                console.error('Error fetching metrics:', err);
+            }
+        }
+
+        // Load Smart Consensus Signals
+        async function loadSignals() {
+            const container = document.getElementById('signals-container');
+            try {
+                const res = await fetch(`/api/v1/signals/consensus?timeframe=${currentTimeframe}&min_score=0&limit=25`);
+                if (!res.ok) throw new Error('Failed to load signals');
+                const signals = await res.json();
+
+                if (signals.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
+                            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-gray-500"></i>
+                            <h4 class="text-sm font-semibold text-gray-300">No Consensus Signals in ${currentTimeframe} Window</h4>
+                            <p class="text-xs text-gray-500 mt-1">Try switching timeframe to 7d or click "Discover Whales" to populate new bandar activity.</p>
+                        </div>`;
+                    lucide.createIcons();
+                    return;
+                }
+
+                container.innerHTML = signals.map(s => {
+                    const isYes = s.consensus_outcome === 'YES';
+                    const outcomeClass = isYes ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                    const scoreColor = s.confidence_score >= 80 ? 'text-emerald-400' : (s.confidence_score >= 50 ? 'text-amber-400' : 'text-gray-400');
+                    const act = s.actionable_signal || {};
+                    const smart = s.smart_money_breakdown || {};
+                    const vel = s.market_velocity || {};
+
+                    return `
+                    <div class="glass-card rounded-xl p-5 border border-gray-800 hover:border-gray-700 transition space-y-4">
+                        <!-- Top Market Header -->
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div class="space-y-1 max-w-2xl">
+                                <div class="flex items-center gap-2">
+                                    <span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider border ${outcomeClass}">${s.consensus_outcome}</span>
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300">${s.strength}</span>
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">${smart.dominant_archetype || 'WHALE'}</span>
+                                    ${vel.price_trend === 'UPWARD_ACCUMULATION' ? '<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400">📈 Upward Trend</span>' : ''}
+                                </div>
+                                <h3 class="text-base font-bold text-white tracking-tight">${s.market_title || s.condition_id}</h3>
+                            </div>
+
+                            <!-- Confidence Score Gauge -->
+                            <div class="flex items-center gap-3 bg-gray-900/90 px-4 py-2 rounded-xl border border-gray-800">
+                                <div class="text-right">
+                                    <div class="text-[10px] text-gray-400 uppercase tracking-wider">CONFIDENCE</div>
+                                    <div class="text-2xl font-black font-mono ${scoreColor}">${s.confidence_score}<span class="text-xs font-normal text-gray-500">/100</span></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Actionable Decision Grid for Hermes -->
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-900/50 p-3 rounded-lg border border-gray-800/80 text-xs">
+                            <div>
+                                <span class="text-gray-400 block text-[10px] uppercase">Recommended Action</span>
+                                <span class="font-bold text-indigo-400 font-mono">${act.recommended_action || 'BUY'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400 block text-[10px] uppercase">Risk Tier</span>
+                                <span class="font-semibold ${act.risk_tier === 'LOW' ? 'text-emerald-400' : 'text-amber-400'}">${act.risk_tier || 'MEDIUM'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400 block text-[10px] uppercase">Max Safe Entry</span>
+                                <span class="font-mono text-white">${act.suggested_max_entry_price || s.average_entry_price}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-400 block text-[10px] uppercase">Potential ROI</span>
+                                <span class="font-mono text-emerald-400">+${act.potential_roi_percent || 0}%</span>
+                            </div>
+                        </div>
+
+                        <!-- Statistics Row -->
+                        <div class="flex flex-wrap items-center justify-between text-xs text-gray-400 pt-1 border-t border-gray-800/60">
+                            <div class="flex items-center gap-4">
+                                <span>🐋 <strong>${s.whale_count}</strong> Bandar(s)</span>
+                                <span>💰 <strong>$${(s.total_volume_usdc || 0).toLocaleString()}</strong> USDC</span>
+                                <span>🏷 Entry: <strong>${s.average_entry_price}</strong></span>
+                                <span>🎯 Win Rate: <strong>${((smart.average_whale_win_rate || 0.5) * 100).toFixed(0)}%</strong></span>
+                            </div>
+                            <button onclick="copyPrompt('${encodeURIComponent(s.ai_rationale)}')" class="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium">
+                                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                                <span>Copy AI Rationale</span>
+                            </button>
+                        </div>
+
+                        <!-- AI Rationale Box -->
+                        <div class="bg-gray-950/70 p-3 rounded-lg border border-gray-800 text-xs text-gray-300 leading-relaxed font-sans">
+                            <span class="text-indigo-400 font-semibold">AI Rationale:</span> ${s.ai_rationale}
+                        </div>
+                    </div>`;
+                }).join('');
+                lucide.createIcons();
+            } catch (err) {
+                container.innerHTML = `<div class="text-center py-12 text-rose-400 text-sm">Failed to load consensus signals.</div>`;
+            }
+        }
+
+        // Load Live Whale Trades Feed
+        async function loadTrades() {
+            const tbody = document.getElementById('trades-table-body');
+            try {
+                const res = await fetch('/api/v1/trades/feed?unread_only=false&limit=30');
+                if (!res.ok) throw new Error('Failed to load trades');
+                const trades = await res.json();
+
+                if (trades.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-gray-500">No trades recorded yet.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = trades.map(t => {
+                    const isBuy = (t.side || 'BUY').toUpperCase() === 'BUY';
+                    const isYes = (t.outcome || 'YES').toUpperCase() === 'YES';
+                    const time = new Date(t.traded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const shortAddr = t.wallet_address ? `${t.wallet_address.substring(0, 6)}...${t.wallet_address.substring(38)}` : '-';
+
+                    return `
+                    <tr class="hover:bg-gray-800/40 transition">
+                        <td class="p-3 text-gray-400">${time}</td>
+                        <td class="p-3">
+                            <span class="text-indigo-400 hover:underline cursor-pointer" onclick="copyText('${t.wallet_address}')" title="${t.wallet_address}">${shortAddr}</span>
+                        </td>
+                        <td class="p-3 text-gray-200 font-sans truncate max-w-xs">${t.market_title || t.condition_id || 'Market'}</td>
+                        <td class="p-3">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isYes ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}">${t.outcome || 'YES'}</span>
+                        </td>
+                        <td class="p-3 text-white font-bold">$${(t.usdc_size || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td class="p-3 text-gray-300">${t.price}</td>
+                        <td class="p-3 text-right">
+                            ${t.transaction_hash ? `<a href="https://polygonscan.com/tx/${t.transaction_hash}" target="_blank" class="text-gray-400 hover:text-white inline-flex items-center gap-1"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>` : '-'}
+                        </td>
+                    </tr>`;
+                }).join('');
+                lucide.createIcons();
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-rose-400 font-sans">Error loading trade stream.</td></tr>`;
+            }
+        }
+
+        // Load Wallets List & Profiles
+        async function loadWallets() {
+            const tbody = document.getElementById('wallets-table-body');
+            try {
+                const res = await fetch('/api/v1/wallets');
+                if (!res.ok) throw new Error('Failed to load wallets');
+                const wallets = await res.json();
+
+                if (wallets.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-gray-500 font-sans">No wallets registered. Click "Add Wallet" to start.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = wallets.map(w => {
+                    const shortAddr = `${w.address.substring(0, 8)}...${w.address.substring(36)}`;
+                    return `
+                    <tr class="hover:bg-gray-800/40 transition">
+                        <td class="p-3">
+                            <div class="font-bold text-white">${w.label || 'Whale Bandar'}</div>
+                            <div class="font-mono text-xs text-gray-400 flex items-center gap-1.5 mt-0.5">
+                                <span>${shortAddr}</span>
+                                <button onclick="copyText('${w.address}')" class="text-gray-500 hover:text-white" title="Copy Address"><i data-lucide="copy" class="w-3 h-3"></i></button>
+                                <a href="https://polymarket.com/profile/${w.address}" target="_blank" class="text-gray-500 hover:text-indigo-400" title="View on Polymarket"><i data-lucide="external-link" class="w-3 h-3"></i></a>
+                            </div>
+                        </td>
+                        <td class="p-3">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">SPECIALIST WHALE</span>
+                        </td>
+                        <td class="p-3">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-400">TIER_1_ELITE</span>
+                        </td>
+                        <td class="p-3">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${w.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800 text-gray-400'}">${w.is_active ? 'ACTIVE' : 'PAUSED'}</span>
+                        </td>
+                        <td class="p-3 text-right space-x-2">
+                            <button onclick="syncWallet('${w.address}')" class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs text-gray-200" title="Sync positions now">Sync</button>
+                            <button onclick="deleteWallet('${w.address}')" class="px-2.5 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-xs text-rose-400" title="Delete wallet">Remove</button>
+                        </td>
+                    </tr>`;
+                }).join('');
+                lucide.createIcons();
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-rose-400 font-sans">Error loading wallets list.</td></tr>`;
+            }
+        }
+
+        // Action: Trigger Whale Discovery
+        async function triggerDiscovery() {
+            const btn = document.getElementById('btn-discover');
+            const originalHTML = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<i data-lucide="loader" class="w-4 h-4 animate-spin"></i><span>Scanning...</span>`;
+            lucide.createIcons();
+
+            try {
+                const res = await fetch('/api/v1/wallets/discover?top_markets_limit=10&max_new_whales=10', { method: 'POST' });
+                const data = await res.json();
+                showToast(`Discovery finished! ${data.discovered_count || 0} new whales tracked.`, 'success');
+                fetchMetrics();
+                if (currentTab === 'wallets') loadWallets();
+            } catch (e) {
+                showToast('Failed to trigger whale discovery', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+                lucide.createIcons();
+            }
+        }
+
+        // Action: Test Hermes Webhook
+        async function testWebhook() {
+            try {
+                showToast('Sending test signal webhook to Hermes Agent...', 'info');
+                const res = await fetch('/api/v1/signals/test-webhook', { method: 'POST' });
+                const data = await res.json();
+                if (data.dispatched) {
+                    showToast('Webhook alert successfully delivered to Hermes Agent!', 'success');
+                } else {
+                    showToast(data.message || 'Webhook test executed (check Hermes URL setting)', 'info');
+                }
+            } catch (e) {
+                showToast('Error executing webhook test', 'error');
+            }
+        }
+
+        // Action: Sync Wallet
+        async function syncWallet(addr) {
+            try {
+                showToast(`Syncing wallet ${addr.substring(0, 8)}...`, 'info');
+                const res = await fetch(`/api/v1/wallets/${addr}/sync`, { method: 'POST' });
+                const data = await res.json();
+                showToast(`Sync complete: ${data.data?.positions_synced || 0} positions synced`, 'success');
+                fetchMetrics();
+            } catch (e) {
+                showToast('Sync failed', 'error');
+            }
+        }
+
+        // Action: Delete Wallet
+        async function deleteWallet(addr) {
+            if (!confirm(`Are you sure you want to stop tracking wallet ${addr}?`)) return;
+            try {
+                const res = await fetch(`/api/v1/wallets/${addr}`, { method: 'DELETE' });
+                if (res.ok) {
+                    showToast('Wallet removed from tracking', 'success');
+                    loadWallets();
+                    fetchMetrics();
+                }
+            } catch (e) {
+                showToast('Failed to delete wallet', 'error');
+            }
+        }
+
+        // Modal: Add Wallet
+        function openAddWalletModal() {
+            document.getElementById('modal-add-wallet').classList.remove('hidden');
+        }
+        function closeAddWalletModal() {
+            document.getElementById('modal-add-wallet').classList.add('hidden');
+        }
+        async function submitAddWallet(e) {
+            e.preventDefault();
+            const addr = document.getElementById('input-wallet-address').value.trim();
+            const label = document.getElementById('input-wallet-label').value.trim() || 'Tracked Whale';
+            const btn = document.getElementById('btn-submit-wallet');
+            btn.disabled = true;
+            btn.textContent = 'Registering...';
+
+            try {
+                const res = await fetch('/api/v1/wallets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address: addr, label: label, is_active: true })
+                });
+                if (res.ok) {
+                    showToast(`Wallet ${label} successfully registered!`, 'success');
+                    closeAddWalletModal();
+                    document.getElementById('input-wallet-address').value = '';
+                    document.getElementById('input-wallet-label').value = '';
+                    loadWallets();
+                    fetchMetrics();
+                } else {
+                    const errData = await res.json();
+                    showToast(errData.detail || 'Failed to add wallet', 'error');
+                }
+            } catch (e) {
+                showToast('Network error adding wallet', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Add & Sync';
+            }
+        }
+
+        // Helpers: Toast Notification & Copy
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const bg = type === 'success' ? 'bg-emerald-600' : (type === 'error' ? 'bg-rose-600' : 'bg-gray-800 border border-gray-700');
+            toast.className = `${bg} text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium transition duration-300 transform translate-y-2 flex items-center gap-2`;
+            toast.innerHTML = `<span>${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'scale-95');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function copyText(txt) {
+            navigator.clipboard.writeText(txt);
+            showToast('Copied to clipboard!', 'success');
+        }
+
+        function copyPrompt(encodedRationale) {
+            const rationale = decodeURIComponent(encodedRationale);
+            navigator.clipboard.writeText(rationale);
+            showToast('AI Rationale copied for Hermes LLM prompt!', 'success');
+        }
+    </script>
+</body>
+</html>

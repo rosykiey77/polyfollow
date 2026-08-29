@@ -20,3 +20,11 @@ async def test_health_check(async_client: AsyncClient):
     assert "database" in data
     assert "poller_running" in data
     assert "uptime_seconds" in data
+
+
+@pytest.mark.asyncio
+async def test_dashboard_endpoint(async_client: AsyncClient):
+    response = await async_client.get("/dashboard")
+    assert response.status_code == 200
+    assert "text/html" in response.headers.get("content-type", "")
+    assert "POLYFOLLOW" in response.text

@@ -49,6 +49,17 @@ polyfollow/
 └── main.py                 # Application entrypoint
 ```
 
+## 🖥️ Modern Web Dashboard (Dark Mode)
+
+Aplikasi kini dilengkapi **Interactive Web Dashboard** yang responsif dan dapat diakses langsung melalui browser di:
+👉 **`http://<IP_VPS>:8000/dashboard`**
+
+**Fitur Dashboard:**
+- 📊 **Real-time Overview Cards**: Status live poller, jumlah wallet bandar aktif, sinyal konsensus aktif, dan posisi terbuka.
+- 🎯 **Smart Consensus Alpha Feed**: Kartu sinyal interaktif lengkap dengan Action Badge (`BUY_YES`/`BUY_NO`), Risk Tier, Max Entry Price, Dominant Archetype, dan tombol 1-klik *"Copy AI Rationale"*.
+- ⚡ **Live Raw Trade Stream**: Tabel transaksi bandar real-time lengkap dengan link ke Polygonscan.
+- 🛠️ **Whale Management & Quick Actions**: Tombol 1-klik untuk *Discover Whales*, *Track Wallet Baru*, *Force Sync*, dan *Test Webhook Hermes Agent*.
+
 ---
 
 ## 📡 REST API Reference (Untuk Hermes Agent)
