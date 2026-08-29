@@ -81,17 +81,42 @@ Dokumentasi interaktif OpenAPI/Swagger UI tersedia di `http://<IP_VPS>:8000/docs
           "size_usdc": 15000.0,
           "entry_price": 0.60,
           "win_rate": 0.80,
-          "trade_count": 1
+          "trade_count": 1,
+          "archetype": "INSIDER_SPECIALIST",
+          "conviction_tier": "TIER_1_ELITE"
         }
       ],
       "has_conflict": false,
       "conflict_whale_count": 0,
-      "ai_rationale": "Strong Consensus: 2 tracked whale(s) entered YES with total volume $21,200.00 USDC (avg price 0.606). Historical average win rate is 75.0%. No conflicting whale positions detected in this window.",
+      "actionable_signal": {
+        "recommended_action": "BUY_YES",
+        "risk_tier": "LOW",
+        "suggested_max_entry_price": 0.656,
+        "current_entry_price": 0.606,
+        "potential_roi_percent": 65.0,
+        "urgency": "CRITICAL"
+      },
+      "smart_money_breakdown": {
+        "total_whales": 2,
+        "insider_specialist_count": 1,
+        "mega_volume_whales_count": 1,
+        "dominant_archetype": "INSIDER_SPECIALIST",
+        "average_whale_win_rate": 0.80,
+        "volume_concentration_index": 0.58,
+        "is_sybil_cluster_suspected": false
+      },
+      "market_velocity": {
+        "price_drift": 0.025,
+        "price_trend": "UPWARD_ACCUMULATION",
+        "timeframe_volume_usdc": 21200.0
+      },
+      "ai_rationale": "[STRONG_CONSENSUS] 2 whale(s) (INSIDER_SPECIALIST) accumulated $21,200.00 on YES @ avg 0.606. Avg win rate: 80.0%, Trend: UPWARD_ACCUMULATION (drift: +0.025). Action: BUY_YES (Risk: LOW, Max safe entry: 0.656, Upside: +65.0%). No conflicting whale positions detected.",
       "first_trade_at": "2026-08-26T18:00:00Z",
       "last_trade_at": "2026-08-26T19:30:00Z"
     }
   ]
   ```
+- `POST /api/v1/signals/test-webhook` : Menguji pengiriman push alert real-time ke Hermes Agent / Telegram.
 
 ### 2. Feed Sinyal Trade Mentah (Raw Trades Feed)
 - `GET /api/v1/trades/feed?unread_only=true&limit=50`
@@ -110,6 +135,7 @@ Dokumentasi interaktif OpenAPI/Swagger UI tersedia di `http://<IP_VPS>:8000/docs
 - `POST /api/v1/wallets/discover` : Memicu auto-discovery otomatis whale/bandar dari top markets dan recent trades.
 - `POST /api/v1/wallets/seed` : Melakukan re-seeding manual daftar curated top whale wallets.
 - `GET /api/v1/wallets/{address}` : Detail informasi wallet.
+- `GET /api/v1/wallets/{address}/profile` : Analisis profil intelijen bandar (Archetype, Conviction Tier, Win Rate, Volume).
 - `DELETE /api/v1/wallets/{address}` : Menghapus wallet dari pelacakan.
 - `POST /api/v1/wallets/{address}/sync` : Memaksa sinkronisasi manual.
 

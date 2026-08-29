@@ -32,5 +32,12 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
+    # Outbound Webhook & Push Alerts (For Hermes AI Agent & Telegram)
+    HERMES_WEBHOOK_URL: Optional[str] = None
+    TELEGRAM_BOT_TOKEN: Optional[str] = None
+    TELEGRAM_CHAT_ID: Optional[str] = None
+    MIN_ALERT_CONFIDENCE_SCORE: float = 75.0
+    MIN_WHALE_TRADE_ALERT_USD: float = 5000.0
+
 
 settings = Settings()

@@ -70,3 +70,18 @@ async def test_wallet_seed_and_discover(async_client: AsyncClient):
     disc_res = await async_client.post("/api/v1/wallets/discover?top_markets_limit=2&max_new_whales=5")
     assert disc_res.status_code == 200
     assert "discovered_count" in disc_res.json()
+
+
+@pytest.mark.asyncio
+async def test_wallet_profile_endpoint(async_client: AsyncClient):
+    addr = "0x9999999999999999999999999999999999999999"
+    await async_client.post("/api/v1/wallets", json={"address": addr, "label": "Profile Whale"})
+
+    prof_res = await async_client.get(f"/api/v1/wallets/{addr}/profile")
+    assert prof_res.status_code == 200
+    pdata = prof_res.json()
+    assert pdata["address"] == addr.lower()
+    assert "archetype" in pdata
+    assert "conviction_tier" in pdata
+    assert "win_rate" in pdata
+    assert "total_volume_usdc" in pdata

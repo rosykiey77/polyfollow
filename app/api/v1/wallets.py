@@ -148,6 +148,59 @@ async def seed_wallets(db: AsyncSession = Depends(get_db)):
     return {"message": f"Seeding completed. Seeded {seeded} wallets.", "seeded_count": seeded}
 
 
+@router.get("/{address}/profile")
+async def get_whale_profile(address: str, db: AsyncSession = Depends(get_db)):
+    """
+    Get detailed behavioral intelligence profile for a whale wallet,
+    including classified Archetype, Conviction Tier, historical stats, and PnL.
+    """
+    clean_address = address.strip().lower()
+    wallet = await db.get(Wallet, clean_address)
+    if not wallet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Wallet {clean_address} not found",
+        )
+
+    # Fetch latest snapshot
+    from app.models.snapshot import Snapshot
+    from app.services.consensus import consensus_service
+
+    snapshot_query = (
+        select(Snapshot)
+        .where(Snapshot.wallet_address == clean_address)
+        .order_by(Snapshot.snapshot_date.desc())
+        .limit(1)
+    )
+    res = await db.execute(snapshot_query)
+    snapshot = res.scalar_one_or_none()
+
+    if not snapshot:
+        snapshot = await tracker_service.update_wallet_snapshot(db, clean_address)
+        await db.commit()
+
+    archetype, tier = consensus_service._classify_whale_archetype(
+        win_rate=snapshot.win_rate,
+        size_usdc=snapshot.total_volume_usdc,
+        trade_count=snapshot.total_trades_count,
+    )
+
+    return {
+        "address": clean_address,
+        "label": wallet.label,
+        "is_active": wallet.is_active,
+        "archetype": archetype.value,
+        "conviction_tier": tier.value,
+        "win_rate": snapshot.win_rate,
+        "total_volume_usdc": snapshot.total_volume_usdc,
+        "total_trades_count": snapshot.total_trades_count,
+        "active_positions_count": snapshot.active_positions_count,
+        "total_pnl_usdc": snapshot.total_pnl_usdc,
+        "created_at": wallet.created_at,
+        "updated_at": wallet.updated_at,
+    }
+
+
 @router.post("/{address}/sync")
 async def sync_wallet_now(address: str, db: AsyncSession = Depends(get_db)):
     """Manually trigger immediate sync for a specific wallet."""

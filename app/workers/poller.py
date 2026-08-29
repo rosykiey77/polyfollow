@@ -53,6 +53,24 @@ class BackgroundPoller:
                         total_positions,
                         total_new_trades,
                     )
+
+                    # If new trades detected or high score alerts configured, evaluate signals for outbound dispatch
+                    if total_new_trades > 0 and (settings.HERMES_WEBHOOK_URL or settings.TELEGRAM_BOT_TOKEN):
+                        try:
+                            from app.services.consensus import consensus_service
+                            from app.services.webhook import webhook_service
+
+                            signals = await consensus_service.get_consensus_signals(
+                                db=session,
+                                timeframe="6h",
+                                min_score=settings.MIN_ALERT_CONFIDENCE_SCORE,
+                                min_whales=1,
+                                limit=5,
+                            )
+                            for sig in signals:
+                                await webhook_service.dispatch_signal_alert(sig.model_dump())
+                        except Exception as alert_err:
+                            logger.warning("Error evaluating consensus signals for webhook dispatch: %s", str(alert_err))
             except asyncio.CancelledError:
                 logger.info("Background Poller received cancellation signal.")
                 break

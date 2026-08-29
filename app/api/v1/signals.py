@@ -45,3 +45,23 @@ async def get_consensus_signals(
         min_whales=min_whales,
         limit=limit,
     )
+
+
+@router.post("/test-webhook")
+async def test_webhook_dispatch(db: AsyncSession = Depends(get_db)):
+    """Test outbound webhook and Telegram alert dispatch with the latest consensus signal."""
+    from app.services.webhook import webhook_service
+
+    signals = await consensus_service.get_consensus_signals(db=db, timeframe="7d", min_score=0.0, min_whales=1, limit=1)
+    if not signals:
+        return {"message": "No signals available to test dispatch", "dispatched": False}
+
+    sample_signal = signals[0].model_dump()
+    # Force min score for test dispatch
+    sample_signal["confidence_score"] = 99.0
+    dispatched = await webhook_service.dispatch_signal_alert(sample_signal)
+    return {
+        "message": "Webhook test dispatch completed",
+        "dispatched": dispatched,
+        "signal_tested": sample_signal["market_title"],
+    }

@@ -102,7 +102,12 @@ async def test_consensus_signals_scoring_and_filtering(async_client: AsyncClient
     assert signal_a["strength"] == "STRONG_CONSENSUS"
     assert signal_a["has_conflict"] is False
     assert len(signal_a["participating_whales"]) == 2
-    assert "Strong Consensus" in signal_a["ai_rationale"]
+    assert "STRONG_CONSENSUS" in signal_a["ai_rationale"]
+    assert signal_a["actionable_signal"]["recommended_action"] == "BUY_YES"
+    assert signal_a["actionable_signal"]["risk_tier"] == "LOW"
+    assert signal_a["actionable_signal"]["potential_roi_percent"] > 0
+    assert "smart_money_breakdown" in signal_a
+    assert "market_velocity" in signal_a
 
     # 2. Query 1h timeframe -> Market A was traded 2h ago and 30m ago (only 1 trade in 1h window)
     res_1h = await async_client.get("/api/v1/signals/consensus?timeframe=1h&min_whales=2")
@@ -135,7 +140,7 @@ async def test_consensus_signals_scoring_and_filtering(async_client: AsyncClient
     assert signal_a_conf["conflict_whale_count"] == 1
     # Score should be reduced by 25 points penalty
     assert signal_a_conf["confidence_score"] < signal_a["confidence_score"]
-    assert "Warning: 1 tracked whale" in signal_a_conf["ai_rationale"]
+    assert "WARNING" in signal_a_conf["ai_rationale"]
 
 
 @pytest.mark.asyncio
@@ -144,3 +149,11 @@ async def test_consensus_signals_empty_filter(async_client: AsyncClient):
     res_empty = await async_client.get("/api/v1/signals/consensus?timeframe=1h&min_whales=50")
     assert res_empty.status_code == 200
     assert res_empty.json() == []
+
+
+@pytest.mark.asyncio
+async def test_signal_webhook_test_endpoint(async_client: AsyncClient):
+    # Test test-webhook endpoint
+    res = await async_client.post("/api/v1/signals/test-webhook")
+    assert res.status_code == 200
+    assert "dispatched" in res.json()

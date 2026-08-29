@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.logging import logger, setup_logging
 from app.services.polymarket import polymarket_client
+from app.services.webhook import webhook_service
 from app.workers.poller import poller
 
 
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down %s...", settings.APP_NAME)
     await poller.stop()
     await polymarket_client.close()
+    await webhook_service.close()
 
 
 app = FastAPI(

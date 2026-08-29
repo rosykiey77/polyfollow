@@ -93,7 +93,7 @@ async def test_tracker_seed_and_discover(db_session: AsyncSession):
         {"proxyWallet": "0x8888888888888888888888888888888888888888", "name": "Whale Boss"}
     ])
     mock_client.get_recent_trades = AsyncMock(return_value=[
-        {"proxyWallet": "0x9999999999999999999999999999999999999999", "name": "Whale Quick", "size": 1000, "price": 0.5, "usdcSize": 500}
+        {"proxyWallet": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "name": "Whale Quick", "size": 1000, "price": 0.5, "usdcSize": 500}
     ])
     mock_client.get_user_positions = AsyncMock(return_value=[])
     mock_client.get_user_activity = AsyncMock(return_value=[])
@@ -108,4 +108,4 @@ async def test_tracker_seed_and_discover(db_session: AsyncSession):
     discovered = await tracker.discover_and_register_whales(db_session, top_markets_limit=1, max_new_whales=5)
     assert len(discovered) == 2
     assert any(d["address"] == "0x8888888888888888888888888888888888888888" for d in discovered)
-    assert any(d["address"] == "0x9999999999999999999999999999999999999999" for d in discovered)
+    assert any(d["address"] == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" for d in discovered)
