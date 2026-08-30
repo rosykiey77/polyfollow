@@ -4,6 +4,8 @@ Backend service otomatis berbasis **Python 3.12+ (FastAPI + Async SQLAlchemy 2.0
 
 Layanan ini dirancang khusus untuk menjadi **sumber data & sinyal berbobot tinggi (*high-conviction signals*)** yang siap dikonsumsi oleh **Hermes AI Agent** di VPS lain.
 
+> 📘 **Panduan Analisa Lengkap**: Baca panduan strategi analisa 3-lapis, matriks indikator, dan checklist sinyal di [**docs/PLAYBOOK.md**](docs/PLAYBOOK.md).
+
 ---
 
 ## 🚀 Fitur Utama
