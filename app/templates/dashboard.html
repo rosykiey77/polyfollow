@@ -300,6 +300,28 @@
         let currentTimeframe = '24h';
         let refreshInterval = null;
 
+        // Auth interceptor for API Key support
+        const urlParams = new URLSearchParams(window.location.search);
+        let apiKey = urlParams.get('api_key') || localStorage.getItem('polyfollow_api_key') || '';
+        if (urlParams.get('api_key')) {
+            localStorage.setItem('polyfollow_api_key', urlParams.get('api_key'));
+        }
+
+        const originalFetch = window.fetch;
+        window.fetch = async function(resource, init = {}) {
+            init.headers = init.headers || {};
+            if (apiKey) {
+                if (init.headers instanceof Headers) {
+                    if (!init.headers.has('X-API-Key')) init.headers.set('X-API-Key', apiKey);
+                } else if (Array.isArray(init.headers)) {
+                    init.headers.push(['X-API-Key', apiKey]);
+                } else {
+                    init.headers['X-API-Key'] = init.headers['X-API-Key'] || apiKey;
+                }
+            }
+            return originalFetch(resource, init);
+        };
+
         // Initialize Dashboard
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();

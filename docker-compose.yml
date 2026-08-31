@@ -26,12 +26,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://polyfollow:polyfollow_secret_pwd@postgres:5432/polyfollow_db
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://polyfollow:polyfollow_secret_pwd@postgres:5432/polyfollow_db}
       - ENVIRONMENT=production
-      - POLLING_INTERVAL_SECONDS=30
-      - ENABLE_BACKGROUND_POLLER=true
-      - LOG_LEVEL=INFO
+      - POLLING_INTERVAL_SECONDS=${POLLING_INTERVAL_SECONDS:-30}
+      - ENABLE_BACKGROUND_POLLER=${ENABLE_BACKGROUND_POLLER:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_KEY=${API_KEY:-}
     ports:
       - "8000:8000"
     healthcheck:

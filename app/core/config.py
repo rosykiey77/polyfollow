@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     REQUEST_TIMEOUT_SECONDS: float = 15.0
     MAX_RETRIES: int = 3
 
+    # Security & Authentication
+    API_KEY: Optional[str] = None
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
