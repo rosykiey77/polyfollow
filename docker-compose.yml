@@ -36,7 +36,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - API_KEY=${API_KEY:-}
     ports:
-      - "8000:8000"
+      - "8899:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
