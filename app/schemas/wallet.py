@@ -19,5 +19,12 @@ class WalletResponse(BaseModel):
     address: str
     label: str | None = None
     is_active: bool
+    win_rate: float = 0.0
+    total_volume_usdc: float = 0.0
+    total_pnl_usdc: float = 0.0
+    total_trades_count: int = 0
+    active_positions_count: int = 0
+    archetype: str = "STANDARD_WHALE"
+    conviction_tier: str = "TIER_2_STRONG"
     created_at: datetime.datetime
     updated_at: datetime.datetime

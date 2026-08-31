@@ -17,17 +17,60 @@ async def _run_initial_sync(address: str):
             pass
 
 
+from app.models.snapshot import Snapshot
+from app.services.consensus import consensus_service
+
+
+async def _build_wallet_response(wallet: Wallet, db: AsyncSession, snap: Snapshot | None = None) -> WalletResponse:
+    if snap is None:
+        snap_stmt = (
+            select(Snapshot)
+            .where(Snapshot.wallet_address == wallet.address)
+            .order_by(Snapshot.snapshot_date.desc())
+            .limit(1)
+        )
+        snap_res = await db.execute(snap_stmt)
+        snap = snap_res.scalar_one_or_none()
+
+    win_rate = snap.win_rate if snap else 0.50
+    vol = snap.total_volume_usdc if snap else 0.0
+    pnl = snap.total_pnl_usdc if snap else 0.0
+    trades_count = snap.total_trades_count if snap else 0
+    active_pos = snap.active_positions_count if snap else 0
+
+    archetype, conviction = consensus_service._classify_whale_archetype(
+        win_rate=win_rate, size_usdc=vol, trade_count=trades_count
+    )
+
+    return WalletResponse(
+        address=wallet.address,
+        label=wallet.label,
+        is_active=wallet.is_active,
+        win_rate=round(win_rate, 4),
+        total_volume_usdc=round(vol, 2),
+        total_pnl_usdc=round(pnl, 2),
+        total_trades_count=trades_count,
+        active_positions_count=active_pos,
+        archetype=archetype.value if hasattr(archetype, "value") else str(archetype),
+        conviction_tier=conviction.value if hasattr(conviction, "value") else str(conviction),
+        created_at=wallet.created_at,
+        updated_at=wallet.updated_at,
+    )
+
+
 @router.get("", response_model=list[WalletResponse])
 async def list_wallets(
     active_only: bool = Query(False, description="Filter only active tracked wallets"),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all tracked bandar/whale wallets."""
+    """List all tracked bandar/whale wallets with performance stats."""
     query = select(Wallet).order_by(Wallet.created_at.desc())
     if active_only:
         query = query.where(Wallet.is_active.is_(True))
     result = await db.execute(query)
-    return result.scalars().all()
+    wallets = result.scalars().all()
+
+    return [await _build_wallet_response(w, db) for w in wallets]
 
 
 @router.post("", response_model=WalletResponse, status_code=status.HTTP_201_CREATED)
@@ -63,7 +106,7 @@ async def create_wallet(
     # Trigger background sync for this wallet immediately
     background_tasks.add_task(_run_initial_sync, clean_address)
 
-    return wallet
+    return await _build_wallet_response(wallet, db)
 
 
 @router.get("/{address}", response_model=WalletResponse)
@@ -76,7 +119,7 @@ async def get_wallet(address: str, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Wallet {clean_address} not found",
         )
-    return wallet
+    return await _build_wallet_response(wallet, db)
 
 
 @router.patch("/{address}", response_model=WalletResponse)
@@ -101,7 +144,7 @@ async def update_wallet(
 
     await db.commit()
     await db.refresh(wallet)
-    return wallet
+    return await _build_wallet_response(wallet, db)
 
 
 @router.delete("/{address}", status_code=status.HTTP_204_NO_CONTENT)

@@ -51,6 +51,16 @@ async def test_api_key_required_when_configured(async_client: AsyncClient):
         # 6. Root health endpoint remains accessible without key
         res_health = await async_client.get("/health")
         assert res_health.status_code == 200
+
+        # 7. Dashboard without key returns login gate
+        res_dash_gate = await async_client.get("/dashboard")
+        assert res_dash_gate.status_code == 200
+        assert "Security Gate" in res_dash_gate.text
+
+        # 8. Dashboard with valid key query parameter returns full dashboard
+        res_dash_auth = await async_client.get("/dashboard?api_key=test-secret-key-123")
+        assert res_dash_auth.status_code == 200
+        assert "Polymarket Bandar Intelligence Dashboard" in res_dash_auth.text
     finally:
         # Reset settings
         settings.API_KEY = None

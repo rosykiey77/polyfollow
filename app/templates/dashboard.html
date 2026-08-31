@@ -247,15 +247,16 @@
                         <thead class="bg-gray-900/80 text-gray-400 uppercase font-mono text-[10px] border-b border-gray-800">
                             <tr>
                                 <th class="p-3">Address & Label</th>
-                                <th class="p-3">Archetype</th>
-                                <th class="p-3">Conviction Tier</th>
+                                <th class="p-3">🎯 Win Rate</th>
+                                <th class="p-3">💰 Volume / PnL</th>
+                                <th class="p-3">Archetype & Tier</th>
                                 <th class="p-3">Status</th>
                                 <th class="p-3 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="wallets-table-body" class="divide-y divide-gray-800/60">
                             <tr>
-                                <td colspan="5" class="text-center py-8 text-gray-500 font-sans">Loading wallets...</td>
+                                <td colspan="6" class="text-center py-8 text-gray-500 font-sans">Loading wallets...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -563,6 +564,15 @@
 
                 tbody.innerHTML = wallets.map(w => {
                     const shortAddr = `${w.address.substring(0, 8)}...${w.address.substring(36)}`;
+                    const winRatePct = ((w.win_rate != null ? w.win_rate : 0.5) * 100).toFixed(1);
+                    const winRateColor = w.win_rate >= 0.70 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : (w.win_rate >= 0.50 ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20');
+                    const archetype = w.archetype ? w.archetype.replace(/_/g, ' ') : 'STANDARD WHALE';
+                    const tier = w.conviction_tier ? w.conviction_tier.replace(/_/g, ' ') : 'TIER 2 STRONG';
+                    const vol = (w.total_volume_usdc || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    const pnl = w.total_pnl_usdc || 0;
+                    const pnlFormatted = (pnl >= 0 ? '+' : '') + '$' + Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    const pnlColor = pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+
                     return `
                     <tr class="hover:bg-gray-800/40 transition">
                         <td class="p-3">
@@ -574,10 +584,19 @@
                             </div>
                         </td>
                         <td class="p-3">
-                            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">SPECIALIST WHALE</span>
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold font-mono border ${winRateColor}">
+                                <span>🎯 ${winRatePct}%</span>
+                            </span>
+                        </td>
+                        <td class="p-3 font-mono">
+                            <div class="text-white font-bold">$${vol}</div>
+                            <div class="text-[10px] ${pnlColor} font-semibold">${pnlFormatted} PnL</div>
                         </td>
                         <td class="p-3">
-                            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-400">TIER_1_ELITE</span>
+                            <div class="flex flex-col gap-1 items-start">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold">${archetype}</span>
+                                <span class="px-2 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-400">${tier}</span>
+                            </div>
                         </td>
                         <td class="p-3">
                             <span class="px-2 py-0.5 rounded text-[10px] font-bold ${w.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800 text-gray-400'}">${w.is_active ? 'ACTIVE' : 'PAUSED'}</span>
@@ -590,7 +609,7 @@
                 }).join('');
                 lucide.createIcons();
             } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-rose-400 font-sans">Error loading wallets list.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-rose-400 font-sans">Error loading wallets list.</td></tr>`;
             }
         }
 
