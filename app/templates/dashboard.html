@@ -172,7 +172,22 @@
         <section id="tab-signals" class="space-y-4">
             <!-- Filter Bar -->
             <div class="flex flex-wrap items-center justify-between gap-3 bg-dark-card p-3 rounded-xl border border-gray-800">
-                <div class="flex items-center gap-3">
+                <!-- Mode Switcher -->
+                <div class="flex items-center gap-2">
+                    <div class="flex rounded-lg bg-gray-900 p-1 border border-gray-800 text-xs">
+                        <button onclick="setConsensusMode('trades')" id="mode-btn-trades" class="px-3 py-1.5 rounded-md font-semibold bg-indigo-600 text-white shadow flex items-center gap-1.5 transition">
+                            <i data-lucide="flame" class="w-3.5 h-3.5"></i>
+                            <span>Trade Flow Momentum</span>
+                        </button>
+                        <button onclick="setConsensusMode('holdings')" id="mode-btn-holdings" class="px-3 py-1.5 rounded-md font-semibold text-gray-400 hover:text-white flex items-center gap-1.5 transition">
+                            <i data-lucide="swords" class="w-3.5 h-3.5 text-amber-400"></i>
+                            <span>Portfolio Holdings Radar (YES vs NO)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Timeframe selector (only active for trades mode) -->
+                <div id="timeframe-wrapper" class="flex items-center gap-3">
                     <span class="text-xs text-gray-400 font-medium">Timeframe:</span>
                     <div class="flex rounded-lg bg-gray-900 p-1 border border-gray-800 text-xs">
                         <button onclick="setTimeframe('1h')" id="tf-1h" class="px-2.5 py-1 rounded font-medium text-gray-400 hover:text-white">1h</button>
@@ -181,9 +196,11 @@
                         <button onclick="setTimeframe('7d')" id="tf-7d" class="px-2.5 py-1 rounded font-medium text-gray-400 hover:text-white">7d</button>
                     </div>
                 </div>
-                <div class="text-xs text-gray-400 flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
-                    <span>Multi-factor confidence scoring ready for Hermes LLM</span>
+
+                <!-- Holdings Indicator -->
+                <div id="holdings-info-wrapper" class="hidden text-xs text-amber-300/90 flex items-center gap-2 font-mono">
+                    <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                    <span>Live Whale Portfolio Holdings • YES vs NO Battle Radar</span>
                 </div>
             </div>
 
@@ -366,6 +383,30 @@
             loadSignals();
         }
 
+        let consensusMode = 'trades'; // 'trades' or 'holdings'
+
+        function setConsensusMode(mode) {
+            consensusMode = mode;
+            const btnTrades = document.getElementById('mode-btn-trades');
+            const btnHoldings = document.getElementById('mode-btn-holdings');
+            const tfWrapper = document.getElementById('timeframe-wrapper');
+            const holdingsInfo = document.getElementById('holdings-info-wrapper');
+
+            if (mode === 'trades') {
+                btnTrades.className = 'px-3 py-1.5 rounded-md font-semibold bg-indigo-600 text-white shadow flex items-center gap-1.5 transition';
+                btnHoldings.className = 'px-3 py-1.5 rounded-md font-semibold text-gray-400 hover:text-white flex items-center gap-1.5 transition';
+                if (tfWrapper) tfWrapper.classList.remove('hidden');
+                if (holdingsInfo) holdingsInfo.classList.add('hidden');
+                loadSignals();
+            } else {
+                btnHoldings.className = 'px-3 py-1.5 rounded-md font-semibold bg-amber-600 text-white shadow flex items-center gap-1.5 transition';
+                btnTrades.className = 'px-3 py-1.5 rounded-md font-semibold text-gray-400 hover:text-white flex items-center gap-1.5 transition';
+                if (tfWrapper) tfWrapper.classList.add('hidden');
+                if (holdingsInfo) holdingsInfo.classList.remove('hidden');
+                loadHoldingsConsensus();
+            }
+        }
+
         function refreshCurrentTab(manual = false) {
             if (manual) {
                 const btn = document.getElementById('btn-refresh');
@@ -373,7 +414,10 @@
                 setTimeout(() => btn.classList.remove('animate-spin'), 600);
             }
             fetchMetrics();
-            if (currentTab === 'signals') loadSignals();
+            if (currentTab === 'signals') {
+                if (consensusMode === 'trades') loadSignals();
+                else loadHoldingsConsensus();
+            }
             else if (currentTab === 'trades') loadTrades();
             else if (currentTab === 'wallets') loadWallets();
             
@@ -504,6 +548,159 @@
                 lucide.createIcons();
             } catch (err) {
                 container.innerHTML = `<div class="text-center py-12 text-rose-400 text-sm">Failed to load consensus signals.</div>`;
+            }
+        }
+
+        // Load Portfolio Holdings Radar (YES vs NO Battle Consensus)
+        async function loadHoldingsConsensus() {
+            const container = document.getElementById('signals-container');
+            container.innerHTML = `
+                <div class="text-center py-12 text-gray-500">
+                    <i data-lucide="loader" class="w-6 h-6 animate-spin mx-auto mb-2 text-amber-400"></i>
+                    <p class="text-sm">Scanning live whale portfolio holdings...</p>
+                </div>`;
+            lucide.createIcons();
+
+            try {
+                const res = await fetch('/api/v1/signals/holdings?min_whales=1&limit=30');
+                if (!res.ok) throw new Error('Failed to load holdings consensus');
+                const holdings = await res.json();
+
+                if (holdings.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
+                            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-gray-500"></i>
+                            <h4 class="text-sm font-semibold text-gray-300">No Open Positions Tracked Yet</h4>
+                            <p class="text-xs text-gray-500 mt-1">Make sure your tracked whales have open positions or click "Sync" in Whale Profiles.</p>
+                        </div>`;
+                    lucide.createIcons();
+                    return;
+                }
+
+                container.innerHTML = holdings.map(h => {
+                    const isConflict = h.verdict === 'WHALE_BATTLE_CONFLICT';
+                    const isStrongYes = h.verdict === 'STRONG_YES_CONVERGENCE';
+                    const isStrongNo = h.verdict === 'STRONG_NO_CONVERGENCE';
+
+                    let verdictBadge = '';
+                    if (isConflict) {
+                        verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1"><i data-lucide="swords" class="w-3.5 h-3.5"></i> WHALE BATTLE / CONFLICT</span>';
+                    } else if (isStrongYes) {
+                        verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1"><i data-lucide="award" class="w-3.5 h-3.5"></i> STRONG YES CONVERGENCE</span>';
+                    } else if (isStrongNo) {
+                        verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1"><i data-lucide="shield" class="w-3.5 h-3.5"></i> STRONG NO CONVERGENCE</span>';
+                    } else {
+                        verdictBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-800 text-gray-300 border border-gray-700">${h.dominant_outcome} LEANING</span>`;
+                    }
+
+                    const yesPct = h.total_portfolio_usdc > 0 ? (h.yes_side.total_value_usdc / h.total_portfolio_usdc * 100).toFixed(1) : 50.0;
+                    const noPct = h.total_portfolio_usdc > 0 ? (h.no_side.total_value_usdc / h.total_portfolio_usdc * 100).toFixed(1) : 50.0;
+
+                    const renderWhalesList = (whales) => {
+                        if (!whales || whales.length === 0) return '<div class="text-xs text-gray-500 italic py-1">No whales in this side</div>';
+                        return whales.map(w => `
+                            <div class="flex items-center justify-between text-xs py-1 border-b border-gray-800/40 last:border-0 font-mono">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-gray-200 font-sans font-semibold">${w.label || w.address.substring(0, 6) + '...' + w.address.substring(38)}</span>
+                                    <span class="text-[10px] text-emerald-400 font-bold">🎯 ${(w.win_rate * 100).toFixed(0)}%</span>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-white font-bold">$${w.cur_value.toLocaleString()}</span>
+                                    <span class="text-[10px] text-gray-400 block">@ ${w.avg_price}</span>
+                                </div>
+                            </div>
+                        `).join('');
+                    };
+
+                    return `
+                    <div class="glass-card rounded-xl p-5 border border-gray-800 hover:border-gray-700 transition space-y-4">
+                        <!-- Market Header -->
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div class="space-y-1.5 max-w-2xl">
+                                <div class="flex items-center gap-2">
+                                    ${verdictBadge}
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">🐋 ${h.total_whales_count} Whales</span>
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300 font-bold">$${h.total_portfolio_usdc.toLocaleString()} USDC</span>
+                                </div>
+                                <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                                    <span>${h.market_title || h.condition_id}</span>
+                                    ${h.condition_id ? `<a href="https://polymarket.com/market/${h.market_slug || h.condition_id}" target="_blank" class="text-gray-500 hover:text-indigo-400" title="View on Polymarket"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>` : ''}
+                                </h3>
+                            </div>
+
+                            <!-- Confidence Score -->
+                            <div class="flex items-center gap-3 bg-gray-900/90 px-4 py-2 rounded-xl border border-gray-800">
+                                <div class="text-right">
+                                    <div class="text-[10px] text-gray-400 uppercase tracking-wider">CONVICTION</div>
+                                    <div class="text-2xl font-black font-mono ${h.confidence_score >= 70 ? 'text-emerald-400' : 'text-amber-400'}">${h.confidence_score}<span class="text-xs font-normal text-gray-500">/100</span></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Visual Dominance Bar -->
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[11px] font-mono font-bold">
+                                <span class="text-emerald-400">🟢 YES: ${yesPct}% ($${h.yes_side.total_value_usdc.toLocaleString()} USDC • ${h.yes_side.whale_count} Whale)</span>
+                                <span class="text-rose-400">🔴 NO: ${noPct}% ($${h.no_side.total_value_usdc.toLocaleString()} USDC • ${h.no_side.whale_count} Whale)</span>
+                            </div>
+                            <div class="w-full h-3 rounded-full bg-gray-800 overflow-hidden flex">
+                                <div class="bg-emerald-500 h-full transition-all duration-500" style="width: ${yesPct}%"></div>
+                                <div class="bg-rose-500 h-full transition-all duration-500" style="width: ${noPct}%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Side by Side Breakdown Comparison -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <!-- YES BOX -->
+                            <div class="bg-emerald-950/20 border border-emerald-500/20 rounded-xl p-3 space-y-2">
+                                <div class="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-2 py-0.5 rounded text-xs font-black bg-emerald-500 text-gray-950">YES</span>
+                                        <span class="text-xs text-emerald-400 font-bold">${h.yes_side.whale_count} Whale(s)</span>
+                                    </div>
+                                    <div class="text-right text-xs font-mono">
+                                        <span class="text-white font-bold">$${h.yes_side.total_value_usdc.toLocaleString()}</span>
+                                        <span class="text-gray-400 text-[10px] block">Avg Entry: ${h.yes_side.average_entry_price}</span>
+                                    </div>
+                                </div>
+                                <div class="space-y-1 pt-1">
+                                    ${renderWhalesList(h.yes_side.whales)}
+                                </div>
+                            </div>
+
+                            <!-- NO BOX -->
+                            <div class="bg-rose-950/20 border border-rose-500/20 rounded-xl p-3 space-y-2">
+                                <div class="flex items-center justify-between border-b border-rose-500/20 pb-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-2 py-0.5 rounded text-xs font-black bg-rose-500 text-white">NO</span>
+                                        <span class="text-xs text-rose-400 font-bold">${h.no_side.whale_count} Whale(s)</span>
+                                    </div>
+                                    <div class="text-right text-xs font-mono">
+                                        <span class="text-white font-bold">$${h.no_side.total_value_usdc.toLocaleString()}</span>
+                                        <span class="text-gray-400 text-[10px] block">Avg Entry: ${h.no_side.average_entry_price}</span>
+                                    </div>
+                                </div>
+                                <div class="space-y-1 pt-1">
+                                    ${renderWhalesList(h.no_side.whales)}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- AI Summary -->
+                        <div class="bg-gray-950/70 p-3 rounded-lg border border-gray-800 text-xs text-gray-300 leading-relaxed font-sans flex items-start justify-between gap-3">
+                            <div>
+                                <span class="text-amber-400 font-semibold">Holdings Intelligence:</span> ${h.ai_summary}
+                            </div>
+                            <button onclick="copyPrompt('${encodeURIComponent(h.ai_summary)}')" class="text-indigo-400 hover:text-indigo-300 shrink-0 flex items-center gap-1 font-medium text-[11px]">
+                                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                                <span>Copy</span>
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('');
+                lucide.createIcons();
+            } catch (err) {
+                container.innerHTML = `<div class="text-center py-12 text-rose-400 text-sm">Failed to load portfolio holdings radar.</div>`;
             }
         }
 

@@ -103,3 +103,42 @@ class ConsensusSignalResponse(BaseModel):
     ai_rationale: str
     first_trade_at: datetime.datetime
     last_trade_at: datetime.datetime
+
+
+class WhaleHoldingInfo(BaseModel):
+    address: str
+    label: str | None = None
+    size: float
+    cur_value: float
+    avg_price: float
+    current_price: float
+    unrealized_pnl: float
+    win_rate: float
+    archetype: str = "STANDARD_WHALE"
+    conviction_tier: str = "TIER_2_STRONG"
+
+
+class OutcomeHoldingsBreakdown(BaseModel):
+    outcome: str
+    whale_count: int
+    total_value_usdc: float
+    total_shares_size: float
+    average_entry_price: float
+    current_price: float
+    total_unrealized_pnl: float
+    whales: list[WhaleHoldingInfo]
+
+
+class MarketHoldingsConsensusResponse(BaseModel):
+    condition_id: str
+    market_title: str | None = None
+    market_slug: str | None = None
+    total_whales_count: int
+    total_portfolio_usdc: float
+    dominant_outcome: str
+    dominance_percentage: float
+    verdict: str
+    confidence_score: float
+    yes_side: OutcomeHoldingsBreakdown
+    no_side: OutcomeHoldingsBreakdown
+    ai_summary: str

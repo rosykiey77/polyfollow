@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.schemas.consensus import ConsensusSignalResponse, TimeframeEnum
+from app.schemas.consensus import (
+    ConsensusSignalResponse,
+    MarketHoldingsConsensusResponse,
+    TimeframeEnum,
+)
 from app.services.consensus import consensus_service
 
 router = APIRouter(prefix="/signals", tags=["Smart Signals & Consensus"])
@@ -42,6 +46,34 @@ async def get_consensus_signals(
         db=db,
         timeframe=timeframe.value,
         min_score=min_score,
+        min_whales=min_whales,
+        limit=limit,
+    )
+
+
+@router.get("/holdings", response_model=list[MarketHoldingsConsensusResponse])
+async def get_holdings_consensus(
+    min_whales: int = Query(
+        1,
+        ge=1,
+        le=50,
+        description="Minimum number of tracked whales holding positions in this market",
+    ),
+    limit: int = Query(
+        30,
+        ge=1,
+        le=100,
+        description="Maximum number of market holdings to analyze",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Portfolio Holdings Radar (YES vs NO Battle Consensus).
+    Aggregates all open positions currently held by tracked whales across prediction markets,
+    comparing YES vs NO exposure, conviction, dominance %, and detecting whale battles.
+    """
+    return await consensus_service.get_portfolio_holdings_consensus(
+        db=db,
         min_whales=min_whales,
         limit=limit,
     )

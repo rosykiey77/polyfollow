@@ -157,3 +157,43 @@ async def test_signal_webhook_test_endpoint(async_client: AsyncClient):
     res = await async_client.post("/api/v1/signals/test-webhook")
     assert res.status_code == 200
     assert "dispatched" in res.json()
+
+
+@pytest.mark.asyncio
+async def test_holdings_consensus_endpoint(async_client: AsyncClient, db_session: AsyncSession):
+    from app.models.position import Position
+
+    addr1 = "0x1111111111111111111111111111111111111111"
+    addr2 = "0x2222222222222222222222222222222222222222"
+    addr3 = "0x3333333333333333333333333333333333333333"
+
+    w1 = Wallet(address=addr1, label="Whale Boss 1", is_active=True)
+    w2 = Wallet(address=addr2, label="Whale Boss 2", is_active=True)
+    w3 = Wallet(address=addr3, label="Whale Opponent", is_active=True)
+    db_session.add_all([w1, w2, w3])
+
+    # Market: Presidential Election
+    cond = "cond_presidential_2028"
+    pos1 = Position(id="pos_h1", wallet_address=addr1, condition_id=cond, market_title="Presidential 2028", outcome="YES", size=50000.0, avg_price=0.55, cur_value=30000.0, unrealized_pnl=2500.0)
+    pos2 = Position(id="pos_h2", wallet_address=addr2, condition_id=cond, market_title="Presidential 2028", outcome="YES", size=40000.0, avg_price=0.58, cur_value=24000.0, unrealized_pnl=800.0)
+    pos3 = Position(id="pos_h3", wallet_address=addr3, condition_id=cond, market_title="Presidential 2028", outcome="NO", size=10000.0, avg_price=0.42, cur_value=4000.0, unrealized_pnl=-200.0)
+    db_session.add_all([pos1, pos2, pos3])
+    await db_session.commit()
+
+    # Query GET /api/v1/signals/holdings
+    res = await async_client.get("/api/v1/signals/holdings?min_whales=2")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) >= 1
+
+    market = next(m for m in data if m["condition_id"] == cond)
+    assert market["total_whales_count"] == 3
+    assert market["dominant_outcome"] == "YES"
+    assert market["dominance_percentage"] > 80.0
+    assert market["verdict"] == "WHALE_BATTLE_CONFLICT"
+    assert market["yes_side"]["whale_count"] == 2
+    assert market["yes_side"]["total_value_usdc"] == 54000.0
+    assert market["no_side"]["whale_count"] == 1
+    assert market["no_side"]["total_value_usdc"] == 4000.0
+    assert "Whale Battle Conflict" in market["ai_summary"]
+
