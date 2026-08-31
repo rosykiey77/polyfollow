@@ -109,3 +109,30 @@ async def test_tracker_seed_and_discover(db_session: AsyncSession):
     assert len(discovered) == 2
     assert any(d["address"] == "0x8888888888888888888888888888888888888888" for d in discovered)
     assert any(d["address"] == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" for d in discovered)
+
+
+@pytest.mark.asyncio
+async def test_hybrid_win_rate_calculation(db_session: AsyncSession):
+    test_addr = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    wallet = await db_session.get(Wallet, test_addr)
+    if not wallet:
+        wallet = Wallet(address=test_addr, label="Whale Accurate", is_active=True)
+        db_session.add(wallet)
+        await db_session.commit()
+
+    # 1. Add 4 positions: 3 in profit ($3000 total val), 1 in loss ($1000 total val)
+    # Total val = $4000. Count ratio = 3/4 = 0.75. Vol ratio = 3000/4000 = 0.75.
+    # Hybrid win rate = 0.60 * 0.75 + 0.40 * 0.75 = 0.75 (75%)
+    p1 = Position(id="p_h1", wallet_address=test_addr, condition_id="c_h1", unrealized_pnl=100.0, cur_value=1000.0)
+    p2 = Position(id="p_h2", wallet_address=test_addr, condition_id="c_h2", unrealized_pnl=200.0, cur_value=1000.0)
+    p3 = Position(id="p_h3", wallet_address=test_addr, condition_id="c_h3", unrealized_pnl=300.0, cur_value=1000.0)
+    p4 = Position(id="p_h4", wallet_address=test_addr, condition_id="c_h4", unrealized_pnl=-50.0, cur_value=1000.0)
+    db_session.add_all([p1, p2, p3, p4])
+    await db_session.commit()
+
+    tracker = TrackerService()
+    snap = await tracker.update_wallet_snapshot(db_session, test_addr)
+    assert snap is not None
+    assert snap.win_rate == 0.75
+    assert snap.active_positions_count == 4
+    assert snap.total_volume_usdc == 4000.0

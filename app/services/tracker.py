@@ -267,22 +267,37 @@ class TrackerService:
         )
         total_volume = float(volume_res.scalar_one_or_none() or 0.0)
 
-        # Count active positions & sum unrealized PnL
-        pos_res = await db.execute(
-            select(func.count(Position.id), func.sum(Position.unrealized_pnl)).where(
-                Position.wallet_address == address
-            )
+        # Query active positions to compute count ratio & volume ratio
+        positions_res = await db.execute(
+            select(Position).where(Position.wallet_address == address)
         )
-        pos_row = pos_res.first()
-        active_positions_count = pos_row[0] if pos_row else 0
-        total_pnl = float(pos_row[1] or 0.0) if pos_row else 0.0
+        positions = positions_res.scalars().all()
+        active_positions_count = len(positions)
+        total_pnl = sum(float(p.unrealized_pnl or 0.0) for p in positions)
+        total_pos_val = sum(float(p.cur_value or 0.0) for p in positions)
+        if total_volume <= 0.0 and total_pos_val > 0.0:
+            total_volume = total_pos_val
 
-        # Approximate win rate from profitable closed positions/trades
-        win_rate = 0.0
-        if total_pnl > 0:
-            win_rate = 0.65  # Positive PnL heuristic base
+        # Hybrid Smart Money Win-Rate Calculation
+        if active_positions_count > 0:
+            profitable_positions = [p for p in positions if float(p.unrealized_pnl or 0.0) > 0]
+            profit_count = len(profitable_positions)
+            ratio_count = profit_count / active_positions_count
+
+            if total_pos_val > 0:
+                profit_val = sum(float(p.cur_value or 0.0) for p in profitable_positions)
+                ratio_volume = profit_val / total_pos_val
+            else:
+                ratio_volume = ratio_count
+
+            # Hybrid: 60% position count win ratio + 40% volume conviction ratio
+            win_rate = (0.60 * ratio_count) + (0.40 * ratio_volume)
         elif total_trades > 0:
+            win_rate = 0.65 if total_volume > 5000.0 else 0.50
+        else:
             win_rate = 0.50
+
+        win_rate = max(0.0, min(1.0, round(win_rate, 4)))
 
         snapshot = Snapshot(
             id=str(uuid.uuid4()),
