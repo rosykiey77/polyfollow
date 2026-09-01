@@ -12,7 +12,10 @@ class BackgroundPoller:
         self.last_run_time: datetime.datetime | None = None
         self.total_runs: int = 0
         self.error_count: int = 0
+        self._task: asyncio.Task | None = None
+
     async def _deferred_initial_discovery(self):
+
         """Run initial whale discovery in background 60 seconds after boot to prevent CPU spike on start."""
         try:
             await asyncio.sleep(60)
