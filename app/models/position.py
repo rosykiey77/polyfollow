@@ -1,6 +1,6 @@
 import datetime
 import uuid
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
@@ -11,6 +11,10 @@ def utc_now():
 
 class Position(Base):
     __tablename__ = "positions"
+    __table_args__ = (
+        Index("ix_positions_condition_value", "condition_id", "cur_value"),
+        Index("ix_positions_cur_value", "cur_value"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     wallet_address: Mapped[str] = mapped_column(
@@ -33,4 +37,6 @@ class Position(Base):
         server_default=func.now(),
     )
 
+
     wallet = relationship("Wallet", back_populates="positions")
+

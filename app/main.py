@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from app.api.v1 import api_v1_router
 from app.api.v1.health import router as health_router
 from app.core.config import settings
@@ -35,6 +36,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Enable GZip compression for payloads >= 1KB (reduces network transfer by up to 80%)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # Enable CORS for flexible integration
 app.add_middleware(
     CORSMiddleware,
@@ -43,6 +47,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Root health check endpoint
 app.include_router(health_router)

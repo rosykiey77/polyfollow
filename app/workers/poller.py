@@ -12,7 +12,17 @@ class BackgroundPoller:
         self.last_run_time: datetime.datetime | None = None
         self.total_runs: int = 0
         self.error_count: int = 0
-        self._task: asyncio.Task | None = None
+    async def _deferred_initial_discovery(self):
+        """Run initial whale discovery in background 60 seconds after boot to prevent CPU spike on start."""
+        try:
+            await asyncio.sleep(60)
+            if not self.is_running:
+                return
+            logger.info("Running deferred initial whale discovery (60s post-boot)...")
+            async with async_session_factory() as session:
+                await tracker_service.discover_and_register_whales(session)
+        except Exception as err:
+            logger.warning("Deferred initial discovery error: %s", str(err))
 
     async def _poller_loop(self):
         logger.info(
@@ -22,14 +32,15 @@ class BackgroundPoller:
         )
         self.is_running = True
 
-        # Initial seed & discovery on startup
+        # Initial seed on startup (lightweight local check)
         try:
             async with async_session_factory() as session:
                 await tracker_service.seed_initial_wallets(session)
                 if settings.ENABLE_AUTO_DISCOVERY:
-                    await tracker_service.discover_and_register_whales(session)
+                    asyncio.create_task(self._deferred_initial_discovery())
         except Exception as startup_err:
-            logger.warning("Error during initial poller startup discovery: %s", str(startup_err))
+            logger.warning("Error during initial poller startup: %s", str(startup_err))
+
 
         while self.is_running:
             try:
