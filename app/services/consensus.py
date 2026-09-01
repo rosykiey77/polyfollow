@@ -2,10 +2,13 @@ import datetime
 from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.cache import memory_cache
+from app.core.config import settings
 from app.models.position import Position
 from app.models.snapshot import Snapshot
 from app.models.trade import Trade
 from app.models.wallet import Wallet
+
 from app.schemas.consensus import (
     ActionableDecision,
     ConsensusSignalResponse,
@@ -71,8 +74,14 @@ class ConsensusService:
         limit: int = 20,
     ) -> list[ConsensusSignalResponse]:
         """Aggregate trades in the timeframe window and compute multi-factor consensus signals."""
+        cache_key = f"signals:consensus:{timeframe}:{min_score}:{min_whales}:{limit}"
+        cached_result = await memory_cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+
         delta = self._parse_timeframe(timeframe)
         cutoff = datetime.datetime.now(datetime.timezone.utc) - delta
+
 
         # 1. Fetch trades within timeframe
         query = (
@@ -376,7 +385,9 @@ class ConsensusService:
 
         # Sort signals by confidence score descending, then volume descending
         signals.sort(key=lambda s: (s.confidence_score, s.total_volume_usdc), reverse=True)
-        return signals[:limit]
+        final_signals = signals[:limit]
+        await memory_cache.set(cache_key, final_signals, ttl=settings.CACHE_TTL_SECONDS)
+        return final_signals
 
     async def get_portfolio_holdings_consensus(
         self,
@@ -385,12 +396,18 @@ class ConsensusService:
         limit: int = 30,
     ) -> list[MarketHoldingsConsensusResponse]:
         """Aggregate open portfolio positions across all tracked whales and compute YES vs NO battle consensus."""
+        cache_key = f"signals:holdings:{min_whales}:{limit}"
+        cached_result = await memory_cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+
         # 1. Fetch all active positions with size > 0 or cur_value > 0
         pos_query = (
             select(Position)
             .where(Position.condition_id.isnot(None), Position.cur_value > 0.0)
             .order_by(Position.updated_at.desc())
         )
+
         pos_res = await db.execute(pos_query)
         positions = pos_res.scalars().all()
 
@@ -564,7 +581,10 @@ class ConsensusService:
 
         # Sort: markets with more whales first, then highest portfolio value
         results.sort(key=lambda x: (x.total_whales_count, x.total_portfolio_usdc), reverse=True)
-        return results[:limit]
+        final_results = results[:limit]
+        await memory_cache.set(cache_key, final_results, ttl=settings.CACHE_TTL_SECONDS)
+        return final_results
 
 
 consensus_service = ConsensusService()
+

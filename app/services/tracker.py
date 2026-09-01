@@ -1,14 +1,18 @@
+import asyncio
 import datetime
 import uuid
 from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.cache import memory_cache
+from app.core.config import settings
 from app.core.logging import logger
 from app.models.position import Position
 from app.models.snapshot import Snapshot
 from app.models.trade import Trade
 from app.models.wallet import Wallet
 from app.services.polymarket import PolymarketClient, polymarket_client
+
 
 # Top known active Polymarket whale/bandar wallets to seed on clean start
 INITIAL_SEED_WALLETS = [
@@ -72,7 +76,7 @@ class TrackerService:
         self,
         db: AsyncSession,
         top_markets_limit: int = 10,
-        max_new_whales: int = 15,
+        max_new_whales: int | None = None,
     ) -> list[dict[str, Any]]:
         """
         Dynamically discover active bandar/whale wallets from Polymarket:
@@ -80,7 +84,8 @@ class TrackerService:
         2. Real-time high volume trades (Data API)
         Automatically registers new wallets and triggers initial sync.
         """
-        logger.info("Running automated Whale/Bandar discovery on Polymarket...")
+        effective_limit = max_new_whales if max_new_whales is not None else settings.MAX_NEW_WHALES_PER_DISCOVERY
+        logger.info("Running automated Whale/Bandar discovery on Polymarket (limit: %d)...", effective_limit)
         discovered_candidates: dict[str, str] = {}
 
         # 1. Discover from top volume markets & their holders
@@ -131,7 +136,7 @@ class TrackerService:
         for addr, label in discovered_candidates.items():
             if addr in existing_addresses:
                 continue
-            if len(newly_registered) >= max_new_whales:
+            if len(newly_registered) >= effective_limit:
                 break
 
             wallet = Wallet(address=addr, label=label, is_active=True)
@@ -141,16 +146,18 @@ class TrackerService:
         if newly_registered:
             await db.commit()
             logger.info("Discovered and registered %d new whale wallets!", len(newly_registered))
-            # Sync each newly registered wallet immediately
+            # Sync each newly registered wallet with event loop friendly spacing
             for item in newly_registered:
                 try:
                     await self.sync_wallet(db, item["address"])
+                    await asyncio.sleep(0.08)
                 except Exception as sync_err:
                     logger.warning("Initial sync error for newly discovered wallet %s: %s", item["address"], str(sync_err))
         else:
             logger.info("All %d discovered whales are already tracked.", len(discovered_candidates))
 
         return newly_registered
+
 
     async def sync_wallet_positions(self, db: AsyncSession, wallet_address: str) -> int:
         """Fetch active positions from Polymarket and replace current DB positions."""
@@ -336,7 +343,7 @@ class TrackerService:
         }
 
     async def sync_all_active_wallets(self, db: AsyncSession) -> list[dict[str, Any]]:
-        """Fetch all active wallets and synchronize each. Auto-seeds if empty."""
+        """Fetch all active wallets and synchronize each with event-loop friendly throttling."""
         result = await db.execute(select(Wallet.address).where(Wallet.is_active.is_(True)))
         active_addresses = [row[0] for row in result.fetchall()]
 
@@ -347,14 +354,24 @@ class TrackerService:
             active_addresses = [row[0] for row in result.fetchall()]
 
         results = []
+        total_new_trades = 0
         for address in active_addresses:
             try:
                 res = await self.sync_wallet(db, address)
                 results.append(res)
+                total_new_trades += res.get("new_trades_detected", 0)
+                # Yield control to event loop so Uvicorn can serve dashboard HTTP requests immediately
+                await asyncio.sleep(0.08)
             except Exception as e:
                 logger.error("Error syncing wallet %s: %s", address, str(e), exc_info=True)
                 await db.rollback()
+
+        # Invalidate signal/metrics cache if fresh activity was recorded
+        if total_new_trades > 0:
+            await memory_cache.clear()
+
         return results
+
 
 
 tracker_service = TrackerService()

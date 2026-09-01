@@ -340,16 +340,33 @@
             return originalFetch(resource, init);
         };
 
+        function startAutoRefresh() {
+            if (refreshInterval) clearInterval(refreshInterval);
+            refreshInterval = setInterval(() => {
+                if (!document.hidden) {
+                    refreshCurrentTab(false);
+                }
+            }, 30000); // 30s interval for low CPU usage on 1-core VPS
+        }
+
         // Initialize Dashboard
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
             fetchMetrics();
             loadSignals();
-            // Start 15s auto-refresh
-            refreshInterval = setInterval(() => {
-                refreshCurrentTab(false);
-            }, 15000);
+            startAutoRefresh();
         });
+
+        // Pause refresh when tab is hidden, resume immediately when active
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                refreshCurrentTab(true);
+                startAutoRefresh();
+            } else {
+                if (refreshInterval) clearInterval(refreshInterval);
+            }
+        });
+
 
         // Tab Switching
         function switchTab(tab) {
@@ -430,9 +447,10 @@
                 const [healthRes, walletsRes, signalsRes, posRes] = await Promise.all([
                     fetch('/health'),
                     fetch('/api/v1/wallets'),
-                    fetch('/api/v1/signals/consensus?min_score=0&limit=100'),
-                    fetch('/api/v1/positions')
+                    fetch('/api/v1/signals/consensus?min_score=0&limit=25'),
+                    fetch('/api/v1/positions?limit=50')
                 ]);
+
 
                 if (healthRes.ok) {
                     const health = await healthRes.json();

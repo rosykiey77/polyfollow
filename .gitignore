@@ -6,6 +6,11 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
-polyfollow.db
+polyfollow.db*
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 .env
 *.log
+
