@@ -1,9 +1,13 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.cache import memory_cache
+from app.core.config import settings
 from app.core.database import async_session_factory, get_db
+from app.models.snapshot import Snapshot
 from app.models.wallet import Wallet
 from app.schemas.wallet import WalletCreate, WalletResponse, WalletUpdate
+from app.services.consensus import consensus_service
 from app.services.tracker import tracker_service
 
 router = APIRouter(prefix="/wallets", tags=["Wallets"])
@@ -13,25 +17,12 @@ async def _run_initial_sync(address: str):
     async with async_session_factory() as session:
         try:
             await tracker_service.sync_wallet(session, address)
+            await memory_cache.invalidate_prefix("wallets:")
         except Exception:
             pass
 
 
-from app.models.snapshot import Snapshot
-from app.services.consensus import consensus_service
-
-
-async def _build_wallet_response(wallet: Wallet, db: AsyncSession, snap: Snapshot | None = None) -> WalletResponse:
-    if snap is None:
-        snap_stmt = (
-            select(Snapshot)
-            .where(Snapshot.wallet_address == wallet.address)
-            .order_by(Snapshot.snapshot_date.desc())
-            .limit(1)
-        )
-        snap_res = await db.execute(snap_stmt)
-        snap = snap_res.scalar_one_or_none()
-
+def _build_wallet_response_from_snap(wallet: Wallet, snap: Snapshot | None = None) -> WalletResponse:
     win_rate = snap.win_rate if snap else 0.50
     vol = snap.total_volume_usdc if snap else 0.0
     pnl = snap.total_pnl_usdc if snap else 0.0
@@ -58,19 +49,57 @@ async def _build_wallet_response(wallet: Wallet, db: AsyncSession, snap: Snapsho
     )
 
 
+async def _build_wallet_response(wallet: Wallet, db: AsyncSession, snap: Snapshot | None = None) -> WalletResponse:
+    if snap is None:
+        snap_stmt = (
+            select(Snapshot)
+            .where(Snapshot.wallet_address == wallet.address)
+            .order_by(Snapshot.snapshot_date.desc())
+            .limit(1)
+        )
+        snap_res = await db.execute(snap_stmt)
+        snap = snap_res.scalar_one_or_none()
+
+    return _build_wallet_response_from_snap(wallet, snap)
+
+
 @router.get("", response_model=list[WalletResponse])
 async def list_wallets(
     active_only: bool = Query(False, description="Filter only active tracked wallets"),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all tracked bandar/whale wallets with performance stats."""
+    """List all tracked bandar/whale wallets with performance stats (batch optimized & cached)."""
+    cache_key = f"wallets:list:{active_only}"
+    cached_data = await memory_cache.get(cache_key)
+    if cached_data is not None:
+        return cached_data
+
     query = select(Wallet).order_by(Wallet.created_at.desc())
     if active_only:
         query = query.where(Wallet.is_active.is_(True))
     result = await db.execute(query)
     wallets = result.scalars().all()
 
-    return [await _build_wallet_response(w, db) for w in wallets]
+    if not wallets:
+        return []
+
+    # Single batch query for snapshots to eliminate N+1 database queries
+    addresses = [w.address for w in wallets]
+    snap_stmt = (
+        select(Snapshot)
+        .where(Snapshot.wallet_address.in_(addresses))
+        .order_by(Snapshot.snapshot_date.desc())
+    )
+    snap_res = await db.execute(snap_stmt)
+    latest_snapshots: dict[str, Snapshot] = {}
+    for s in snap_res.scalars().all():
+        if s.wallet_address not in latest_snapshots:
+            latest_snapshots[s.wallet_address] = s
+
+    responses = [_build_wallet_response_from_snap(w, latest_snapshots.get(w.address)) for w in wallets]
+    await memory_cache.set(cache_key, responses, ttl=settings.CACHE_TTL_SECONDS)
+    return responses
+
 
 
 @router.post("", response_model=WalletResponse, status_code=status.HTTP_201_CREATED)
@@ -105,6 +134,8 @@ async def create_wallet(
 
     # Trigger background sync for this wallet immediately
     background_tasks.add_task(_run_initial_sync, clean_address)
+    await memory_cache.invalidate_prefix("wallets:")
+    await memory_cache.invalidate_prefix("dashboard:")
 
     return await _build_wallet_response(wallet, db)
 
@@ -144,6 +175,8 @@ async def update_wallet(
 
     await db.commit()
     await db.refresh(wallet)
+    await memory_cache.invalidate_prefix("wallets:")
+    await memory_cache.invalidate_prefix("dashboard:")
     return await _build_wallet_response(wallet, db)
 
 
@@ -159,7 +192,10 @@ async def delete_wallet(address: str, db: AsyncSession = Depends(get_db)):
         )
     await db.delete(wallet)
     await db.commit()
+    await memory_cache.invalidate_prefix("wallets:")
+    await memory_cache.invalidate_prefix("dashboard:")
     return None
+
 
 
 @router.post("/discover")

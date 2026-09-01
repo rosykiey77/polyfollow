@@ -441,37 +441,22 @@
             document.getElementById('last-updated-text').textContent = 'Updated ' + new Date().toLocaleTimeString();
         }
 
-        // Fetch Overview Metrics
+        // Fetch Overview Metrics (Single Consolidated Endpoint)
         async function fetchMetrics() {
             try {
-                const [healthRes, walletsRes, signalsRes, posRes] = await Promise.all([
-                    fetch('/health'),
-                    fetch('/api/v1/wallets'),
-                    fetch('/api/v1/signals/consensus?min_score=0&limit=25'),
-                    fetch('/api/v1/positions?limit=50')
-                ]);
-
-
-                if (healthRes.ok) {
-                    const health = await healthRes.json();
-                    document.getElementById('metric-health').textContent = health.status === 'healthy' ? '100% ONLINE' : 'DEGRADED';
-                }
-                if (walletsRes.ok) {
-                    const wallets = await walletsRes.json();
-                    document.getElementById('metric-wallets').textContent = wallets.length;
-                }
-                if (signalsRes.ok) {
-                    const signals = await signalsRes.json();
-                    document.getElementById('metric-signals').textContent = signals.length;
-                }
-                if (posRes.ok) {
-                    const positions = await posRes.json();
-                    document.getElementById('metric-positions').textContent = positions.length;
+                const res = await fetch('/api/v1/dashboard/summary');
+                if (res.ok) {
+                    const summary = await res.json();
+                    document.getElementById('metric-health').textContent = summary.status === 'healthy' ? '100% ONLINE' : 'DEGRADED';
+                    document.getElementById('metric-wallets').textContent = summary.total_wallets;
+                    document.getElementById('metric-signals').textContent = summary.total_signals;
+                    document.getElementById('metric-positions').textContent = summary.total_positions;
                 }
             } catch (err) {
                 console.error('Error fetching metrics:', err);
             }
         }
+
 
         // Load Smart Consensus Signals
         async function loadSignals() {

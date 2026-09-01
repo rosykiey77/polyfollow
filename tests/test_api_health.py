@@ -28,3 +28,17 @@ async def test_dashboard_endpoint(async_client: AsyncClient):
     assert response.status_code == 200
     assert "text/html" in response.headers.get("content-type", "")
     assert "POLYFOLLOW" in response.text
+
+
+@pytest.mark.asyncio
+async def test_dashboard_summary_endpoint(async_client: AsyncClient):
+    response = await async_client.get("/api/v1/dashboard/summary")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_wallets" in data
+    assert "total_signals" in data
+    assert "total_positions" in data
+    assert "total_trades_tracked" in data
+    assert "status" in data
+    assert data["database"] == "connected"
+
