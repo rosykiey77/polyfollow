@@ -16,6 +16,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.35'
+          memory: 1024M
 
   api:
     build:
@@ -31,7 +36,7 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://polyfollow:polyfollow_secret_pwd@postgres:5432/polyfollow_db}
       - ENVIRONMENT=production
-      - POLLING_INTERVAL_SECONDS=${POLLING_INTERVAL_SECONDS:-30}
+      - POLLING_INTERVAL_SECONDS=${POLLING_INTERVAL_SECONDS:-60}
       - ENABLE_BACKGROUND_POLLER=${ENABLE_BACKGROUND_POLLER:-true}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - API_KEY=${API_KEY:-}
@@ -42,6 +47,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.45'
+          memory: 2048M
 
 volumes:
   polyfollow_pgdata:
+
