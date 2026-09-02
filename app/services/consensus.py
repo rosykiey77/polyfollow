@@ -27,9 +27,30 @@ from app.schemas.consensus import (
 )
 
 
+def _ensure_utc(val: datetime.datetime | None) -> datetime.datetime:
+    """Safely ensure datetime is timezone-aware UTC to prevent timezone subtraction errors."""
+    if val is None:
+        return datetime.datetime.now(datetime.timezone.utc)
+    if isinstance(val, str):
+        try:
+            val = datetime.datetime.fromisoformat(val.replace("Z", "+00:00"))
+        except Exception:
+            return datetime.datetime.now(datetime.timezone.utc)
+    if isinstance(val, (int, float)):
+        if val > 1e11:
+            val = val / 1000.0
+        return datetime.datetime.fromtimestamp(val, tz=datetime.timezone.utc)
+    if isinstance(val, datetime.datetime):
+        if val.tzinfo is None:
+            return val.replace(tzinfo=datetime.timezone.utc)
+        return val.astimezone(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 class ConsensusService:
     @staticmethod
     def _parse_timeframe(timeframe: str) -> datetime.timedelta:
+
         mapping = {
             TimeframeEnum.ONE_HOUR: datetime.timedelta(hours=1),
             "1h": datetime.timedelta(hours=1),
@@ -154,7 +175,7 @@ class ConsensusService:
                 pw["total_shares"] += t.size
                 pw["weighted_price_sum"] += t.price * t.size if t.size > 0 else t.price * t.usdc_size
                 pw["trade_count"] += 1
-                pw["timestamps"].append(t.traded_at)
+                pw["timestamps"].append(_ensure_utc(t.traded_at))
 
             whale_count = len(participating_whales_dict)
             if whale_count < min_whales:
@@ -206,9 +227,9 @@ class ConsensusService:
 
             # Sybil / Correlated Fast Entry Check (< 180 seconds between different wallets)
             is_sybil_suspected = False
-            all_first_times = [sorted(pw["timestamps"])[0] for pw in participating_whales_dict.values() if pw["timestamps"]]
+            all_first_times = [_ensure_utc(sorted(pw["timestamps"])[0]) for pw in participating_whales_dict.values() if pw["timestamps"]]
             if len(all_first_times) >= 2:
-                time_span = (max(all_first_times) - min(all_first_times)).total_seconds()
+                time_span = abs((max(all_first_times) - min(all_first_times)).total_seconds())
                 if time_span < 180:
                     is_sybil_suspected = True
 
@@ -217,6 +238,7 @@ class ConsensusService:
 
             # Bonus for healthy decentralized whale backing vs high concentration penalty
             concentration_adj = 5.0 if (concentration_index <= 0.55 and whale_count >= 2) else (-5.0 if concentration_index > 0.90 and whale_count > 1 else 0.0)
+
 
             raw_score = s_whales + s_vol + s_rep - p_conflict + concentration_adj
             confidence_score = max(0.0, min(100.0, round(raw_score, 1)))
@@ -277,10 +299,11 @@ class ConsensusService:
                 dominant_archetype = WhaleArchetypeEnum.STANDARD_WHALE
 
             # Market Velocity & Price Drift
-            first_trade = dominant_list[0].traded_at
-            last_trade = dominant_list[-1].traded_at
+            first_trade = _ensure_utc(dominant_list[0].traded_at)
+            last_trade = _ensure_utc(dominant_list[-1].traded_at)
             first_p = dominant_list[0].price
             last_p = dominant_list[-1].price
+
             price_drift = round(last_p - first_p, 4)
             if price_drift > 0.02:
                 price_trend = "UPWARD_ACCUMULATION"
