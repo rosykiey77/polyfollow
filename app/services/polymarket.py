@@ -39,9 +39,15 @@ def setup_dns_bypass():
     def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
         host_str = host.decode("utf-8") if isinstance(host, bytes) else str(host or "")
         if host_str.lower() in POLYMARKET_DOMAINS:
-            # Force direct resolution to verified Polymarket Cloudflare Anycast IPs (100% immune to DNS hijacking/poisoning/Internet Positif)
-            ip = DEFAULT_POLYMARKET_IPS[0]
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
+            try:
+                p = int(port)
+            except (ValueError, TypeError):
+                p = 443
+            # Return all verified Cloudflare Anycast IPs to guarantee connectivity and load balancing
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, p))
+                for ip in DEFAULT_POLYMARKET_IPS
+            ]
         return _ORIGINAL_GETADDRINFO(host, port, family, type, proto, flags)
 
 
@@ -100,7 +106,7 @@ class PolymarketClient:
                     url,
                     attempt,
                     settings.MAX_RETRIES,
-                    str(exc),
+                    repr(exc),
                 )
                 if attempt == settings.MAX_RETRIES:
                     return None
