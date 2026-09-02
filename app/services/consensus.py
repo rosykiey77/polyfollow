@@ -441,18 +441,27 @@ class ConsensusService:
         pos_query = (
             select(Position)
             .where(Position.condition_id.isnot(None), Position.cur_value > 0.0)
-            .order_by(Position.updated_at.desc())
         )
 
         pos_res = await db.execute(pos_query)
         positions = pos_res.scalars().all()
+        if not positions:
+            return []
 
-        # 2. Fetch wallet metadata & snapshots (1 row per wallet)
-        wallets_res = await db.execute(select(Wallet))
+        # 2. Fetch wallet metadata & snapshots ONLY for active whale addresses
+        whale_addresses = {p.wallet_address for p in positions}
+        wallets_res = await db.execute(select(Wallet).where(Wallet.address.in_(whale_addresses)))
         wallets_map = {w.address: w for w in wallets_res.scalars().all()}
 
-        snaps_res = await db.execute(select(Snapshot))
-        snaps_map = {s.wallet_address: s for s in snaps_res.scalars().all()}
+        snaps_res = await db.execute(
+            select(Snapshot)
+            .where(Snapshot.wallet_address.in_(whale_addresses))
+            .order_by(Snapshot.snapshot_date.desc())
+        )
+        snaps_map = {}
+        for s in snaps_res.scalars().all():
+            if s.wallet_address not in snaps_map:
+                snaps_map[s.wallet_address] = s
 
 
         # 3. Group positions by condition_id

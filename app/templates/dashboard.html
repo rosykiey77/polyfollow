@@ -675,9 +675,9 @@
                 lucide.createIcons();
             }
 
-            // 3. Revalidate from server (10s timeout)
+            // 3. Revalidate from server (20s timeout)
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
 
             try {
                 const res = await fetch(`/api/v1/signals/consensus?timeframe=${currentTimeframe}&min_score=0&limit=25`, { signal: controller.signal });
@@ -904,9 +904,9 @@
                 lucide.createIcons();
             }
 
-            // 3. Revalidate from server (10s timeout)
+            // 3. Revalidate from server (20s timeout)
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
 
             try {
                 const res = await fetch('/api/v1/signals/holdings?min_whales=1&limit=30', { signal: controller.signal });
