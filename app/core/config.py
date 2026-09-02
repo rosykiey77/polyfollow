@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     MAX_RETRIES: int = 3
 
     # In-Memory Cache (For Low-spec VPS optimization)
-    CACHE_TTL_SECONDS: int = 60
+    CACHE_TTL_SECONDS: int = 300
     ENABLE_CACHE: bool = True
+
 
 
     # Security & Authentication

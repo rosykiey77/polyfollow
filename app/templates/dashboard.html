@@ -547,8 +547,125 @@
 
 
         // Load Smart Consensus Signals
+        // Render Signals List helper
+        function renderSignalsList(signals) {
+            const container = document.getElementById('container-momentum-signals');
+            if (!container) return;
+
+            let filtered = signals;
+            if (currentEntryFilter === 'sweet_spot') {
+                filtered = signals.filter(s => {
+                    const zone = (s.actionable_signal && s.actionable_signal.entry_zone) || (s.average_entry_price >= 0.35 && s.average_entry_price <= 0.75 ? 'OPTIMAL_SWEET_SPOT' : '');
+                    return zone === 'OPTIMAL_SWEET_SPOT';
+                });
+            }
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
+                        <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-gray-500"></i>
+                        <h4 class="text-sm font-semibold text-gray-300">No ${currentEntryFilter === 'sweet_spot' ? 'Sweet Spot ($0.35–$0.75)' : ''} Signals in ${currentTimeframe} Window</h4>
+                        <p class="text-xs text-gray-500 mt-1">Try switching filter to "All Markets" or timeframe to 7d.</p>
+                    </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            container.innerHTML = filtered.map(s => {
+                const isYes = s.consensus_outcome === 'YES';
+                const outcomeClass = isYes ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                const scoreColor = s.confidence_score >= 80 ? 'text-emerald-400' : (s.confidence_score >= 50 ? 'text-amber-400' : 'text-gray-400');
+                const act = s.actionable_signal || {};
+                const smart = s.smart_money_breakdown || {};
+                const vel = s.market_velocity || {};
+                const zoneBadge = getEntryZoneBadge(act.entry_zone || (s.average_entry_price >= 0.88 ? 'AVOID_LATE_FOMO' : (s.average_entry_price > 0.75 ? 'LATE_OVERBOUGHT' : (s.average_entry_price >= 0.35 ? 'OPTIMAL_SWEET_SPOT' : 'EARLY_SPECULATIVE'))), act.potential_roi_percent || 0);
+
+                return `
+                <div class="glass-card rounded-xl p-5 border border-gray-800 hover:border-gray-700 transition space-y-4">
+                    <!-- Top Market Header -->
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div class="space-y-1 max-w-2xl">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider border ${outcomeClass}">${s.consensus_outcome}</span>
+                                ${zoneBadge}
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300">${s.strength}</span>
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">${smart.dominant_archetype || 'WHALE'}</span>
+                                ${vel.price_trend === 'UPWARD_ACCUMULATION' ? '<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400">📈 Upward Trend</span>' : ''}
+                            </div>
+                            <h3 class="text-base font-bold text-white tracking-tight">${s.market_title || s.condition_id}</h3>
+                        </div>
+
+                        <!-- Confidence Score Gauge -->
+                        <div class="flex items-center gap-3 bg-gray-900/90 px-4 py-2 rounded-xl border border-gray-800">
+                            <div class="text-right">
+                                <div class="text-[10px] text-gray-400 uppercase tracking-wider">CONFIDENCE</div>
+                                <div class="text-2xl font-black font-mono ${scoreColor}">${s.confidence_score}<span class="text-xs font-normal text-gray-500">/100</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actionable Decision Grid for Hermes -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-900/50 p-3 rounded-lg border border-gray-800/80 text-xs">
+                        <div>
+                            <span class="text-gray-400 block text-[10px] uppercase">Recommended Action</span>
+                            <span class="font-bold text-indigo-400 font-mono">${act.recommended_action || 'BUY'}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-400 block text-[10px] uppercase">Risk Tier</span>
+                            <span class="font-semibold ${act.risk_tier === 'LOW' ? 'text-emerald-400' : 'text-amber-400'}">${act.risk_tier || 'MEDIUM'}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-400 block text-[10px] uppercase">Max Safe Entry</span>
+                            <span class="font-mono text-white">${act.suggested_max_entry_price || s.average_entry_price}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-400 block text-[10px] uppercase">Potential ROI</span>
+                            <span class="font-mono text-emerald-400">+${act.potential_roi_percent || 0}%</span>
+                        </div>
+                    </div>
+
+                    <!-- Statistics Row -->
+                    <div class="flex flex-wrap items-center justify-between text-xs text-gray-400 pt-1 border-t border-gray-800/60">
+                        <div class="flex items-center gap-4">
+                            <span>🐋 <strong>${s.whale_count}</strong> Bandar(s)</span>
+                            <span>💰 <strong>$${(s.total_volume_usdc || 0).toLocaleString()}</strong> USDC</span>
+                            <span>🏷 Entry: <strong>${s.average_entry_price}</strong></span>
+                            <span>🎯 Win Rate: <strong>${((smart.average_whale_win_rate || 0.5) * 100).toFixed(0)}%</strong></span>
+                        </div>
+                        <button onclick="copyPrompt('${encodeURIComponent(s.ai_rationale)}')" class="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium">
+                            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                            <span>Copy AI Rationale</span>
+                        </button>
+                    </div>
+
+                    <!-- AI Rationale Box -->
+                    <div class="bg-gray-950/70 p-3 rounded-lg border border-gray-800 text-xs text-gray-300 leading-relaxed font-sans">
+                        <span class="text-indigo-400 font-semibold">AI Rationale:</span> ${s.ai_rationale}
+                    </div>
+                </div>`;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        // Load Smart Consensus Signals (Stale-While-Revalidate)
         async function loadSignals(showSpinner = false) {
             const container = document.getElementById('container-momentum-signals');
+            const cacheKey = `poly_signals_${currentTimeframe}`;
+            const cached = localStorage.getItem(cacheKey);
+
+            // 1. Instant Cache Render (0ms)
+            if (cached && container.children.length === 0) {
+                try {
+                    const parsed = JSON.parse(cached);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        renderSignalsList(parsed);
+                    }
+                } catch (e) {
+                    console.warn("Invalid local signals cache:", e);
+                }
+            }
+
+            // 2. Show spinner only if container has no content
             if (showSpinner || container.children.length === 0) {
                 container.innerHTML = `
                     <div class="text-center py-12 text-gray-500">
@@ -558,123 +675,219 @@
                 lucide.createIcons();
             }
 
-
+            // 3. Revalidate from server
             try {
                 const res = await fetch(`/api/v1/signals/consensus?timeframe=${currentTimeframe}&min_score=0&limit=25`);
                 if (!res.ok) throw new Error('Failed to load signals');
                 const signals = await res.json();
-
-                let filtered = signals;
-                if (currentEntryFilter === 'sweet_spot') {
-                    filtered = signals.filter(s => {
-                        const zone = (s.actionable_signal && s.actionable_signal.entry_zone) || (s.average_entry_price >= 0.35 && s.average_entry_price <= 0.75 ? 'OPTIMAL_SWEET_SPOT' : '');
-                        return zone === 'OPTIMAL_SWEET_SPOT';
-                    });
-                }
-
-                if (filtered.length === 0) {
-                    container.innerHTML = `
-                        <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
-                            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-gray-500"></i>
-                            <h4 class="text-sm font-semibold text-gray-300">No ${currentEntryFilter === 'sweet_spot' ? 'Sweet Spot ($0.35–$0.75)' : ''} Signals in ${currentTimeframe} Window</h4>
-                            <p class="text-xs text-gray-500 mt-1">Try switching filter to "All Markets" or timeframe to 7d.</p>
-                        </div>`;
-                    lucide.createIcons();
-                    return;
-                }
-
-                container.innerHTML = filtered.map(s => {
-                    const isYes = s.consensus_outcome === 'YES';
-                    const outcomeClass = isYes ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-                    const scoreColor = s.confidence_score >= 80 ? 'text-emerald-400' : (s.confidence_score >= 50 ? 'text-amber-400' : 'text-gray-400');
-                    const act = s.actionable_signal || {};
-                    const smart = s.smart_money_breakdown || {};
-                    const vel = s.market_velocity || {};
-                    const zoneBadge = getEntryZoneBadge(act.entry_zone || (s.average_entry_price >= 0.88 ? 'AVOID_LATE_FOMO' : (s.average_entry_price > 0.75 ? 'LATE_OVERBOUGHT' : (s.average_entry_price >= 0.35 ? 'OPTIMAL_SWEET_SPOT' : 'EARLY_SPECULATIVE'))), act.potential_roi_percent || 0);
-
-                    return `
-                    <div class="glass-card rounded-xl p-5 border border-gray-800 hover:border-gray-700 transition space-y-4">
-                        <!-- Top Market Header -->
-                        <div class="flex flex-wrap items-start justify-between gap-3">
-                            <div class="space-y-1 max-w-2xl">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider border ${outcomeClass}">${s.consensus_outcome}</span>
-                                    ${zoneBadge}
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300">${s.strength}</span>
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">${smart.dominant_archetype || 'WHALE'}</span>
-                                    ${vel.price_trend === 'UPWARD_ACCUMULATION' ? '<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400">📈 Upward Trend</span>' : ''}
-                                </div>
-                                <h3 class="text-base font-bold text-white tracking-tight">${s.market_title || s.condition_id}</h3>
-                            </div>
-
-
-                            <!-- Confidence Score Gauge -->
-                            <div class="flex items-center gap-3 bg-gray-900/90 px-4 py-2 rounded-xl border border-gray-800">
-                                <div class="text-right">
-                                    <div class="text-[10px] text-gray-400 uppercase tracking-wider">CONFIDENCE</div>
-                                    <div class="text-2xl font-black font-mono ${scoreColor}">${s.confidence_score}<span class="text-xs font-normal text-gray-500">/100</span></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Actionable Decision Grid for Hermes -->
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-900/50 p-3 rounded-lg border border-gray-800/80 text-xs">
-                            <div>
-                                <span class="text-gray-400 block text-[10px] uppercase">Recommended Action</span>
-                                <span class="font-bold text-indigo-400 font-mono">${act.recommended_action || 'BUY'}</span>
-                            </div>
-                            <div>
-                                <span class="text-gray-400 block text-[10px] uppercase">Risk Tier</span>
-                                <span class="font-semibold ${act.risk_tier === 'LOW' ? 'text-emerald-400' : 'text-amber-400'}">${act.risk_tier || 'MEDIUM'}</span>
-                            </div>
-                            <div>
-                                <span class="text-gray-400 block text-[10px] uppercase">Max Safe Entry</span>
-                                <span class="font-mono text-white">${act.suggested_max_entry_price || s.average_entry_price}</span>
-                            </div>
-                            <div>
-                                <span class="text-gray-400 block text-[10px] uppercase">Potential ROI</span>
-                                <span class="font-mono text-emerald-400">+${act.potential_roi_percent || 0}%</span>
-                            </div>
-                        </div>
-
-                        <!-- Statistics Row -->
-                        <div class="flex flex-wrap items-center justify-between text-xs text-gray-400 pt-1 border-t border-gray-800/60">
-                            <div class="flex items-center gap-4">
-                                <span>🐋 <strong>${s.whale_count}</strong> Bandar(s)</span>
-                                <span>💰 <strong>$${(s.total_volume_usdc || 0).toLocaleString()}</strong> USDC</span>
-                                <span>🏷 Entry: <strong>${s.average_entry_price}</strong></span>
-                                <span>🎯 Win Rate: <strong>${((smart.average_whale_win_rate || 0.5) * 100).toFixed(0)}%</strong></span>
-                            </div>
-                            <button onclick="copyPrompt('${encodeURIComponent(s.ai_rationale)}')" class="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium">
-                                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-                                <span>Copy AI Rationale</span>
-                            </button>
-                        </div>
-
-                        <!-- AI Rationale Box -->
-                        <div class="bg-gray-950/70 p-3 rounded-lg border border-gray-800 text-xs text-gray-300 leading-relaxed font-sans">
-                            <span class="text-indigo-400 font-semibold">AI Rationale:</span> ${s.ai_rationale}
-                        </div>
-                    </div>`;
-                }).join('');
-                lucide.createIcons();
+                localStorage.setItem(cacheKey, JSON.stringify(signals));
+                renderSignalsList(signals);
             } catch (err) {
                 console.error("Error loading consensus signals:", err);
-                container.innerHTML = `
-                    <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
-                        <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-amber-400"></i>
-                        <h4 class="text-sm font-semibold text-gray-300">No active consensus signals found in this window</h4>
-                        <p class="text-xs text-gray-500 mt-1">Try switching timeframe to 7d or switch to "Portfolio Holdings Radar".</p>
-                        <button onclick="loadSignals(true)" class="mt-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Retry</button>
-                    </div>`;
-                lucide.createIcons();
+                if (container.children.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
+                            <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-amber-400"></i>
+                            <h4 class="text-sm font-semibold text-gray-300">No active consensus signals found in this window</h4>
+                            <p class="text-xs text-gray-500 mt-1">Try switching timeframe to 7d or switch to "Portfolio Holdings Radar".</p>
+                            <button onclick="loadSignals(true)" class="mt-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Retry</button>
+                        </div>`;
+                    lucide.createIcons();
+                }
             }
         }
 
 
-        // Load Portfolio Holdings Radar (YES vs NO Battle Consensus)
+        // Render Holdings List helper
+        function renderHoldingsList(holdings) {
+            const container = document.getElementById('container-holdings-radar');
+            if (!container) return;
+
+            let filteredHoldings = holdings;
+            if (currentEntryFilter === 'sweet_spot') {
+                filteredHoldings = holdings.filter(h => {
+                    const yesPrice = h.yes_side?.average_entry_price ?? 0;
+                    const noPrice = h.no_side?.average_entry_price ?? 0;
+                    const domPrice = h.dominant_outcome === 'YES' ? yesPrice : noPrice;
+                    const zone = h.entry_zone || (domPrice >= 0.35 && domPrice <= 0.75 ? 'OPTIMAL_SWEET_SPOT' : '');
+                    return zone === 'OPTIMAL_SWEET_SPOT';
+                });
+            }
+
+            if (filteredHoldings.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
+                        <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-gray-500"></i>
+                        <h4 class="text-sm font-semibold text-gray-300">No ${currentEntryFilter === 'sweet_spot' ? 'Sweet Spot ($0.35–$0.75)' : ''} Holdings Tracked Yet</h4>
+                        <p class="text-xs text-gray-500 mt-1">Try switching filter to "All Markets" or click "Sync" in Whale Profiles.</p>
+                    </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            container.innerHTML = filteredHoldings.map(h => {
+                const isConflict = h.verdict === 'WHALE_BATTLE_CONFLICT';
+                const isStrongYes = h.verdict === 'STRONG_YES_CONVERGENCE';
+                const isStrongNo = h.verdict === 'STRONG_NO_CONVERGENCE';
+
+                let verdictBadge = '';
+                if (isConflict) {
+                    verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1"><i data-lucide="swords" class="w-3.5 h-3.5"></i> WHALE BATTLE / CONFLICT</span>';
+                } else if (isStrongYes) {
+                    verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1"><i data-lucide="award" class="w-3.5 h-3.5"></i> STRONG YES CONVERGENCE</span>';
+                } else if (isStrongNo) {
+                    verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1"><i data-lucide="shield" class="w-3.5 h-3.5"></i> STRONG NO CONVERGENCE</span>';
+                } else {
+                    verdictBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-800 text-gray-300 border border-gray-700">${h.dominant_outcome || 'YES'} LEANING</span>`;
+                }
+
+                const yesSide = h.yes_side || {};
+                const noSide = h.no_side || {};
+                const yesVal = Number(yesSide.total_value_usdc || 0);
+                const noVal = Number(noSide.total_value_usdc || 0);
+                const yesWhales = Number(yesSide.whale_count || 0);
+                const noWhales = Number(noSide.whale_count || 0);
+                const yesEntry = Number(yesSide.average_entry_price || 0);
+                const noEntry = Number(noSide.average_entry_price || 0);
+                const totalPort = Number(h.total_portfolio_usdc || (yesVal + noVal));
+
+                const domPrice = h.dominant_outcome === 'YES' ? yesEntry : noEntry;
+                const zoneBadge = getEntryZoneBadge(h.entry_zone || (domPrice >= 0.88 ? 'AVOID_LATE_FOMO' : (domPrice > 0.75 ? 'LATE_OVERBOUGHT' : (domPrice >= 0.35 ? 'OPTIMAL_SWEET_SPOT' : 'EARLY_SPECULATIVE'))), h.potential_roi_percent || 0);
+
+                const yesPct = totalPort > 0 ? ((yesVal / totalPort) * 100).toFixed(1) : (yesVal > 0 ? '100.0' : (noVal > 0 ? '0.0' : '50.0'));
+                const noPct = totalPort > 0 ? ((noVal / totalPort) * 100).toFixed(1) : (noVal > 0 ? '100.0' : (yesVal > 0 ? '0.0' : '50.0'));
+
+                const renderWhalesList = (whales) => {
+                    if (!whales || whales.length === 0) return '<div class="text-xs text-gray-500 italic py-1">No whales in this side</div>';
+                    return whales.map(w => {
+                        const wVal = Number(w.cur_value || 0);
+                        const wWin = Number(w.win_rate || 0.5);
+                        const wPrice = Number(w.avg_price || 0);
+                        const addrStr = w.address ? (w.address.substring(0, 6) + '...' + w.address.substring(38)) : 'Unknown';
+                        return `
+                        <div class="flex items-center justify-between text-xs py-1 border-b border-gray-800/40 last:border-0 font-mono">
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-gray-200 font-sans font-semibold">${w.label || addrStr}</span>
+                                <span class="text-[10px] text-emerald-400 font-bold">🎯 ${(wWin * 100).toFixed(0)}%</span>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-white font-bold">$${wVal.toLocaleString()}</span>
+                                <span class="text-[10px] text-gray-400 block">@ ${wPrice}</span>
+                            </div>
+                        </div>`;
+                    }).join('');
+                };
+
+                return `
+                <div class="glass-card rounded-xl p-5 border border-gray-800 hover:border-gray-700 transition space-y-4">
+                    <!-- Market Header -->
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div class="space-y-1.5 max-w-2xl">
+                            <div class="flex flex-wrap items-center gap-2">
+                                ${verdictBadge}
+                                ${zoneBadge}
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">🐋 ${h.total_whales_count || (yesWhales + noWhales)} Whales</span>
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300 font-bold">$${totalPort.toLocaleString()} USDC</span>
+                            </div>
+
+                            <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                                <span>${h.market_title || h.condition_id}</span>
+                                ${h.condition_id ? `<a href="https://polymarket.com/market/${h.market_slug || h.condition_id}" target="_blank" class="text-gray-500 hover:text-indigo-400" title="View on Polymarket"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>` : ''}
+                            </h3>
+                        </div>
+
+                        <!-- Confidence Score -->
+                        <div class="flex items-center gap-3 bg-gray-900/90 px-4 py-2 rounded-xl border border-gray-800">
+                            <div class="text-right">
+                                <div class="text-[10px] text-gray-400 uppercase tracking-wider">CONVICTION</div>
+                                <div class="text-2xl font-black font-mono ${(h.confidence_score || 0) >= 70 ? 'text-emerald-400' : 'text-amber-400'}">${h.confidence_score || 50}<span class="text-xs font-normal text-gray-500">/100</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Visual Dominance Bar -->
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-[11px] font-mono font-bold">
+                            <span class="text-emerald-400">🟢 YES: ${yesPct}% ($${yesVal.toLocaleString()} USDC • ${yesWhales} Whale)</span>
+                            <span class="text-rose-400">🔴 NO: ${noPct}% ($${noVal.toLocaleString()} USDC • ${noWhales} Whale)</span>
+                        </div>
+                        <div class="w-full h-3 rounded-full bg-gray-800 overflow-hidden flex">
+                            <div class="bg-emerald-500 h-full transition-all duration-500" style="width: ${yesPct}%"></div>
+                            <div class="bg-rose-500 h-full transition-all duration-500" style="width: ${noPct}%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Side by Side Breakdown Comparison -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <!-- YES BOX -->
+                        <div class="bg-emerald-950/20 border border-emerald-500/20 rounded-xl p-3 space-y-2">
+                            <div class="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="px-2 py-0.5 rounded text-xs font-black bg-emerald-500 text-gray-950">YES</span>
+                                    <span class="text-xs text-emerald-400 font-bold">${yesWhales} Whale(s)</span>
+                                </div>
+                                <div class="text-right text-xs font-mono">
+                                    <span class="text-white font-bold">$${yesVal.toLocaleString()}</span>
+                                    <span class="text-gray-400 text-[10px] block">Avg Entry: ${yesEntry}</span>
+                                </div>
+                            </div>
+                            <div class="space-y-1 pt-1">
+                                    ${renderWhalesList(yesSide.whales || [])}
+                            </div>
+                        </div>
+
+                        <!-- NO BOX -->
+                        <div class="bg-rose-950/20 border border-rose-500/20 rounded-xl p-3 space-y-2">
+                            <div class="flex items-center justify-between border-b border-rose-500/20 pb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="px-2 py-0.5 rounded text-xs font-black bg-rose-500 text-white">NO</span>
+                                    <span class="text-xs text-rose-400 font-bold">${noWhales} Whale(s)</span>
+                                </div>
+                                <div class="text-right text-xs font-mono">
+                                    <span class="text-white font-bold">$${noVal.toLocaleString()}</span>
+                                    <span class="text-gray-400 text-[10px] block">Avg Entry: ${noEntry}</span>
+                                </div>
+                            </div>
+                            <div class="space-y-1 pt-1">
+                                    ${renderWhalesList(noSide.whales || [])}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Summary -->
+                    <div class="bg-gray-950/70 p-3 rounded-lg border border-gray-800 text-xs text-gray-300 leading-relaxed font-sans flex items-start justify-between gap-3">
+                        <div>
+                            <span class="text-amber-400 font-semibold">Holdings Intelligence:</span> ${h.ai_summary || 'Analysis in progress...'}
+                        </div>
+                        <button onclick="copyPrompt('${encodeURIComponent(h.ai_summary || '')}')" class="text-indigo-400 hover:text-indigo-300 shrink-0 flex items-center gap-1 font-medium text-[11px]">
+                            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                            <span>Copy</span>
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        // Load Portfolio Holdings Radar (Stale-While-Revalidate)
         async function loadHoldingsConsensus(showSpinner = false) {
             const container = document.getElementById('container-holdings-radar');
+            const cacheKey = 'poly_holdings';
+            const cached = localStorage.getItem(cacheKey);
+
+            // 1. Instant Cache Render (0ms)
+            if (cached && container.children.length === 0) {
+                try {
+                    const parsed = JSON.parse(cached);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        renderHoldingsList(parsed);
+                    }
+                } catch (e) {
+                    console.warn("Invalid local holdings cache:", e);
+                }
+            }
+
+            // 2. Show spinner only if container is empty
             if (showSpinner || container.children.length === 0) {
                 container.innerHTML = `
                     <div class="text-center py-12 text-gray-500">
@@ -684,187 +897,28 @@
                 lucide.createIcons();
             }
 
+            // 3. Revalidate from server
             try {
                 const res = await fetch('/api/v1/signals/holdings?min_whales=1&limit=30');
                 if (!res.ok) throw new Error('Failed to load holdings consensus');
                 const holdings = await res.json();
-
-                let filteredHoldings = holdings;
-                if (currentEntryFilter === 'sweet_spot') {
-                    filteredHoldings = holdings.filter(h => {
-                        const yesPrice = h.yes_side?.average_entry_price ?? 0;
-                        const noPrice = h.no_side?.average_entry_price ?? 0;
-                        const domPrice = h.dominant_outcome === 'YES' ? yesPrice : noPrice;
-                        const zone = h.entry_zone || (domPrice >= 0.35 && domPrice <= 0.75 ? 'OPTIMAL_SWEET_SPOT' : '');
-                        return zone === 'OPTIMAL_SWEET_SPOT';
-                    });
-                }
-
-                if (filteredHoldings.length === 0) {
-                    container.innerHTML = `
-                        <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
-                            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-gray-500"></i>
-                            <h4 class="text-sm font-semibold text-gray-300">No ${currentEntryFilter === 'sweet_spot' ? 'Sweet Spot ($0.35–$0.75)' : ''} Holdings Tracked Yet</h4>
-                            <p class="text-xs text-gray-500 mt-1">Try switching filter to "All Markets" or click "Sync" in Whale Profiles.</p>
-                        </div>`;
-                    lucide.createIcons();
-                    return;
-                }
-
-                container.innerHTML = filteredHoldings.map(h => {
-                    const isConflict = h.verdict === 'WHALE_BATTLE_CONFLICT';
-                    const isStrongYes = h.verdict === 'STRONG_YES_CONVERGENCE';
-                    const isStrongNo = h.verdict === 'STRONG_NO_CONVERGENCE';
-
-                    let verdictBadge = '';
-                    if (isConflict) {
-                        verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1"><i data-lucide="swords" class="w-3.5 h-3.5"></i> WHALE BATTLE / CONFLICT</span>';
-                    } else if (isStrongYes) {
-                        verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1"><i data-lucide="award" class="w-3.5 h-3.5"></i> STRONG YES CONVERGENCE</span>';
-                    } else if (isStrongNo) {
-                        verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1"><i data-lucide="shield" class="w-3.5 h-3.5"></i> STRONG NO CONVERGENCE</span>';
-                    } else {
-                        verdictBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-800 text-gray-300 border border-gray-700">${h.dominant_outcome || 'YES'} LEANING</span>`;
-                    }
-
-                    const yesSide = h.yes_side || {};
-                    const noSide = h.no_side || {};
-                    const yesVal = Number(yesSide.total_value_usdc || 0);
-                    const noVal = Number(noSide.total_value_usdc || 0);
-                    const yesWhales = Number(yesSide.whale_count || 0);
-                    const noWhales = Number(noSide.whale_count || 0);
-                    const yesEntry = Number(yesSide.average_entry_price || 0);
-                    const noEntry = Number(noSide.average_entry_price || 0);
-                    const totalPort = Number(h.total_portfolio_usdc || (yesVal + noVal));
-
-                    const domPrice = h.dominant_outcome === 'YES' ? yesEntry : noEntry;
-                    const zoneBadge = getEntryZoneBadge(h.entry_zone || (domPrice >= 0.88 ? 'AVOID_LATE_FOMO' : (domPrice > 0.75 ? 'LATE_OVERBOUGHT' : (domPrice >= 0.35 ? 'OPTIMAL_SWEET_SPOT' : 'EARLY_SPECULATIVE'))), h.potential_roi_percent || 0);
-
-                    const yesPct = totalPort > 0 ? ((yesVal / totalPort) * 100).toFixed(1) : (yesVal > 0 ? '100.0' : (noVal > 0 ? '0.0' : '50.0'));
-                    const noPct = totalPort > 0 ? ((noVal / totalPort) * 100).toFixed(1) : (noVal > 0 ? '100.0' : (yesVal > 0 ? '0.0' : '50.0'));
-
-                    const renderWhalesList = (whales) => {
-                        if (!whales || whales.length === 0) return '<div class="text-xs text-gray-500 italic py-1">No whales in this side</div>';
-                        return whales.map(w => {
-                            const wVal = Number(w.cur_value || 0);
-                            const wWin = Number(w.win_rate || 0.5);
-                            const wPrice = Number(w.avg_price || 0);
-                            const addrStr = w.address ? (w.address.substring(0, 6) + '...' + w.address.substring(38)) : 'Unknown';
-                            return `
-                            <div class="flex items-center justify-between text-xs py-1 border-b border-gray-800/40 last:border-0 font-mono">
-                                <div class="flex items-center gap-1.5">
-                                    <span class="text-gray-200 font-sans font-semibold">${w.label || addrStr}</span>
-                                    <span class="text-[10px] text-emerald-400 font-bold">🎯 ${(wWin * 100).toFixed(0)}%</span>
-                                </div>
-                                <div class="text-right">
-                                    <span class="text-white font-bold">$${wVal.toLocaleString()}</span>
-                                    <span class="text-[10px] text-gray-400 block">@ ${wPrice}</span>
-                                </div>
-                            </div>`;
-                        }).join('');
-                    };
-
-                    return `
-                    <div class="glass-card rounded-xl p-5 border border-gray-800 hover:border-gray-700 transition space-y-4">
-                        <!-- Market Header -->
-                        <div class="flex flex-wrap items-start justify-between gap-3">
-                            <div class="space-y-1.5 max-w-2xl">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    ${verdictBadge}
-                                    ${zoneBadge}
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">🐋 ${h.total_whales_count || (yesWhales + noWhales)} Whales</span>
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300 font-bold">$${totalPort.toLocaleString()} USDC</span>
-                                </div>
-
-                                <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
-                                    <span>${h.market_title || h.condition_id}</span>
-                                    ${h.condition_id ? `<a href="https://polymarket.com/market/${h.market_slug || h.condition_id}" target="_blank" class="text-gray-500 hover:text-indigo-400" title="View on Polymarket"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>` : ''}
-                                </h3>
-                            </div>
-
-                            <!-- Confidence Score -->
-                            <div class="flex items-center gap-3 bg-gray-900/90 px-4 py-2 rounded-xl border border-gray-800">
-                                <div class="text-right">
-                                    <div class="text-[10px] text-gray-400 uppercase tracking-wider">CONVICTION</div>
-                                    <div class="text-2xl font-black font-mono ${(h.confidence_score || 0) >= 70 ? 'text-emerald-400' : 'text-amber-400'}">${h.confidence_score || 50}<span class="text-xs font-normal text-gray-500">/100</span></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Visual Dominance Bar -->
-                        <div class="space-y-1">
-                            <div class="flex justify-between text-[11px] font-mono font-bold">
-                                <span class="text-emerald-400">🟢 YES: ${yesPct}% ($${yesVal.toLocaleString()} USDC • ${yesWhales} Whale)</span>
-                                <span class="text-rose-400">🔴 NO: ${noPct}% ($${noVal.toLocaleString()} USDC • ${noWhales} Whale)</span>
-                            </div>
-                            <div class="w-full h-3 rounded-full bg-gray-800 overflow-hidden flex">
-                                <div class="bg-emerald-500 h-full transition-all duration-500" style="width: ${yesPct}%"></div>
-                                <div class="bg-rose-500 h-full transition-all duration-500" style="width: ${noPct}%"></div>
-                            </div>
-                        </div>
-
-                        <!-- Side by Side Breakdown Comparison -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <!-- YES BOX -->
-                            <div class="bg-emerald-950/20 border border-emerald-500/20 rounded-xl p-3 space-y-2">
-                                <div class="flex items-center justify-between border-b border-emerald-500/20 pb-2">
-                                    <div class="flex items-center gap-2">
-                                        <span class="px-2 py-0.5 rounded text-xs font-black bg-emerald-500 text-gray-950">YES</span>
-                                        <span class="text-xs text-emerald-400 font-bold">${yesWhales} Whale(s)</span>
-                                    </div>
-                                    <div class="text-right text-xs font-mono">
-                                        <span class="text-white font-bold">$${yesVal.toLocaleString()}</span>
-                                        <span class="text-gray-400 text-[10px] block">Avg Entry: ${yesEntry}</span>
-                                    </div>
-                                </div>
-                                <div class="space-y-1 pt-1">
-                                    ${renderWhalesList(yesSide.whales || [])}
-                                </div>
-                            </div>
-
-                            <!-- NO BOX -->
-                            <div class="bg-rose-950/20 border border-rose-500/20 rounded-xl p-3 space-y-2">
-                                <div class="flex items-center justify-between border-b border-rose-500/20 pb-2">
-                                    <div class="flex items-center gap-2">
-                                        <span class="px-2 py-0.5 rounded text-xs font-black bg-rose-500 text-white">NO</span>
-                                        <span class="text-xs text-rose-400 font-bold">${noWhales} Whale(s)</span>
-                                    </div>
-                                    <div class="text-right text-xs font-mono">
-                                        <span class="text-white font-bold">$${noVal.toLocaleString()}</span>
-                                        <span class="text-gray-400 text-[10px] block">Avg Entry: ${noEntry}</span>
-                                    </div>
-                                </div>
-                                <div class="space-y-1 pt-1">
-                                    ${renderWhalesList(noSide.whales || [])}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- AI Summary -->
-                        <div class="bg-gray-950/70 p-3 rounded-lg border border-gray-800 text-xs text-gray-300 leading-relaxed font-sans flex items-start justify-between gap-3">
-                            <div>
-                                <span class="text-amber-400 font-semibold">Holdings Intelligence:</span> ${h.ai_summary || 'Analysis in progress...'}
-                            </div>
-                            <button onclick="copyPrompt('${encodeURIComponent(h.ai_summary || '')}')" class="text-indigo-400 hover:text-indigo-300 shrink-0 flex items-center gap-1 font-medium text-[11px]">
-                                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-                                <span>Copy</span>
-                            </button>
-                        </div>
-                    </div>`;
-                }).join('');
-                lucide.createIcons();
+                localStorage.setItem(cacheKey, JSON.stringify(holdings));
+                renderHoldingsList(holdings);
             } catch (err) {
                 console.error("Error loading portfolio holdings radar:", err);
-                container.innerHTML = `
-                    <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
-                        <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-amber-400"></i>
-                        <h4 class="text-sm font-semibold text-gray-300">Unable to load portfolio holdings radar</h4>
-                        <p class="text-xs text-gray-500 mt-1">Make sure tracked whales have open positions or click "Sync" in Whale Profiles.</p>
-                        <button onclick="loadHoldingsConsensus(true)" class="mt-3 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold">Retry</button>
-                    </div>`;
-                lucide.createIcons();
+                if (container.children.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
+                            <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-amber-400"></i>
+                            <h4 class="text-sm font-semibold text-gray-300">Unable to load portfolio holdings radar</h4>
+                            <p class="text-xs text-gray-500 mt-1">Make sure tracked whales have open positions or click "Sync" in Whale Profiles.</p>
+                            <button onclick="loadHoldingsConsensus(true)" class="mt-3 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold">Retry</button>
+                        </div>`;
+                    lucide.createIcons();
+                }
             }
         }
+
 
 
 

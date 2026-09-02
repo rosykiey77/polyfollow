@@ -634,6 +634,22 @@ class ConsensusService:
         await memory_cache.set(cache_key, final_results, ttl=settings.CACHE_TTL_SECONDS)
         return final_results
 
+    async def warm_up_cache(self, db: AsyncSession) -> None:
+        """Pre-compute consensus signals and portfolio holdings radar into memory cache for instant dashboard access."""
+        try:
+            logger.info("Pre-warming consensus signals & holdings in-memory cache...")
+            # Pre-compute primary timeframes
+            await self.get_consensus_signals(db=db, timeframe="24h", min_whales=1, min_score=0.0, limit=25)
+            await self.get_consensus_signals(db=db, timeframe="7d", min_whales=1, min_score=0.0, limit=25)
+            await self.get_consensus_signals(db=db, timeframe="6h", min_whales=1, min_score=0.0, limit=25)
+            await self.get_consensus_signals(db=db, timeframe="1h", min_whales=1, min_score=0.0, limit=25)
+            # Pre-compute holdings radar
+            await self.get_portfolio_holdings_consensus(db=db, min_whales=1, limit=30)
+            logger.info("Consensus in-memory cache successfully warmed up.")
+        except Exception as warm_err:
+            logger.warning("Failed to warm up consensus cache: %s", str(warm_err))
+
 
 consensus_service = ConsensusService()
+
 

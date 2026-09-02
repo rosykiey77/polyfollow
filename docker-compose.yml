@@ -37,6 +37,8 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://polyfollow:polyfollow_secret_pwd@postgres:5432/polyfollow_db}
       - ENVIRONMENT=production
       - POLLING_INTERVAL_SECONDS=${POLLING_INTERVAL_SECONDS:-300}
+      - CACHE_TTL_SECONDS=${CACHE_TTL_SECONDS:-300}
+
 
       - ENABLE_BACKGROUND_POLLER=${ENABLE_BACKGROUND_POLLER:-true}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

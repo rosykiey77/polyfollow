@@ -41,6 +41,12 @@ class BackgroundPoller:
                 await tracker_service.seed_initial_wallets(session)
                 if settings.ENABLE_AUTO_DISCOVERY:
                     asyncio.create_task(self._deferred_initial_discovery())
+                # Pre-warm consensus signals cache on startup
+                try:
+                    from app.services.consensus import consensus_service
+                    await consensus_service.warm_up_cache(session)
+                except Exception as warm_err:
+                    logger.warning("Error during initial consensus cache warmup: %s", str(warm_err))
         except Exception as startup_err:
             logger.warning("Error during initial poller startup: %s", str(startup_err))
 
@@ -67,6 +73,14 @@ class BackgroundPoller:
                         total_positions,
                         total_new_trades,
                     )
+
+                    # Pre-warm consensus cache in memory for 0ms dashboard queries
+                    try:
+                        from app.services.consensus import consensus_service
+                        await consensus_service.warm_up_cache(session)
+                    except Exception as cycle_warm_err:
+                        logger.warning("Error pre-warming consensus cache in cycle: %s", str(cycle_warm_err))
+
 
                     # If new trades detected or high score alerts configured, evaluate signals for outbound dispatch
                     if total_new_trades > 0 and (settings.HERMES_WEBHOOK_URL or settings.TELEGRAM_BOT_TOKEN):
