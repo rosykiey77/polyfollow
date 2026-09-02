@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import memory_cache
 from app.core.config import settings
+from app.core.logging import logger
 from app.models.position import Position
 from app.models.snapshot import Snapshot
 from app.models.trade import Trade
