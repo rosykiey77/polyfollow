@@ -228,14 +228,23 @@
                 </div>
             </div>
 
-            <!-- Signals Feed Container -->
-            <div id="signals-container" class="space-y-3">
+            <!-- Signals Feed Container (Trade Flow Momentum) -->
+            <div id="container-momentum-signals" class="space-y-3">
                 <div class="text-center py-12 text-gray-500">
                     <i data-lucide="loader" class="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-400"></i>
                     <p class="text-sm">Calculating whale consensus...</p>
                 </div>
             </div>
+
+            <!-- Portfolio Holdings Radar Container (YES vs NO Battle) -->
+            <div id="container-holdings-radar" class="hidden space-y-3">
+                <div class="text-center py-12 text-gray-500">
+                    <i data-lucide="loader" class="w-6 h-6 animate-spin mx-auto mb-2 text-amber-400"></i>
+                    <p class="text-sm">Scanning live whale portfolio holdings...</p>
+                </div>
+            </div>
         </section>
+
 
         <!-- TAB 2: LIVE WHALE TRADES FEED -->
         <section id="tab-trades" class="hidden space-y-4">
@@ -474,21 +483,28 @@
             const btnHoldings = document.getElementById('mode-btn-holdings');
             const tfWrapper = document.getElementById('timeframe-wrapper');
             const holdingsInfo = document.getElementById('holdings-info-wrapper');
+            const containerTrades = document.getElementById('container-momentum-signals');
+            const containerHoldings = document.getElementById('container-holdings-radar');
 
             if (mode === 'trades') {
                 btnTrades.className = 'px-3 py-1.5 rounded-md font-semibold bg-indigo-600 text-white shadow flex items-center gap-1.5 transition';
                 btnHoldings.className = 'px-3 py-1.5 rounded-md font-semibold text-gray-400 hover:text-white flex items-center gap-1.5 transition';
                 if (tfWrapper) tfWrapper.classList.remove('hidden');
                 if (holdingsInfo) holdingsInfo.classList.add('hidden');
+                if (containerTrades) containerTrades.classList.remove('hidden');
+                if (containerHoldings) containerHoldings.classList.add('hidden');
                 loadSignals(false);
             } else {
                 btnHoldings.className = 'px-3 py-1.5 rounded-md font-semibold bg-amber-600 text-white shadow flex items-center gap-1.5 transition';
                 btnTrades.className = 'px-3 py-1.5 rounded-md font-semibold text-gray-400 hover:text-white flex items-center gap-1.5 transition';
                 if (tfWrapper) tfWrapper.classList.add('hidden');
                 if (holdingsInfo) holdingsInfo.classList.remove('hidden');
+                if (containerHoldings) containerHoldings.classList.remove('hidden');
+                if (containerTrades) containerTrades.classList.add('hidden');
                 loadHoldingsConsensus(false);
             }
         }
+
 
 
 
@@ -532,7 +548,7 @@
 
         // Load Smart Consensus Signals
         async function loadSignals(showSpinner = false) {
-            const container = document.getElementById('signals-container');
+            const container = document.getElementById('container-momentum-signals');
             if (showSpinner || container.children.length === 0) {
                 container.innerHTML = `
                     <div class="text-center py-12 text-gray-500">
@@ -541,6 +557,7 @@
                     </div>`;
                 lucide.createIcons();
             }
+
 
             try {
                 const res = await fetch(`/api/v1/signals/consensus?timeframe=${currentTimeframe}&min_score=0&limit=25`);
@@ -657,7 +674,7 @@
 
         // Load Portfolio Holdings Radar (YES vs NO Battle Consensus)
         async function loadHoldingsConsensus(showSpinner = false) {
-            const container = document.getElementById('signals-container');
+            const container = document.getElementById('container-holdings-radar');
             if (showSpinner || container.children.length === 0) {
                 container.innerHTML = `
                     <div class="text-center py-12 text-gray-500">
@@ -672,11 +689,12 @@
                 if (!res.ok) throw new Error('Failed to load holdings consensus');
                 const holdings = await res.json();
 
-
                 let filteredHoldings = holdings;
                 if (currentEntryFilter === 'sweet_spot') {
                     filteredHoldings = holdings.filter(h => {
-                        const domPrice = h.dominant_outcome === 'YES' ? h.yes_side.average_entry_price : h.no_side.average_entry_price;
+                        const yesPrice = h.yes_side?.average_entry_price ?? 0;
+                        const noPrice = h.no_side?.average_entry_price ?? 0;
+                        const domPrice = h.dominant_outcome === 'YES' ? yesPrice : noPrice;
                         const zone = h.entry_zone || (domPrice >= 0.35 && domPrice <= 0.75 ? 'OPTIMAL_SWEET_SPOT' : '');
                         return zone === 'OPTIMAL_SWEET_SPOT';
                     });
@@ -706,29 +724,44 @@
                     } else if (isStrongNo) {
                         verdictBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1"><i data-lucide="shield" class="w-3.5 h-3.5"></i> STRONG NO CONVERGENCE</span>';
                     } else {
-                        verdictBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-800 text-gray-300 border border-gray-700">${h.dominant_outcome} LEANING</span>`;
+                        verdictBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-gray-800 text-gray-300 border border-gray-700">${h.dominant_outcome || 'YES'} LEANING</span>`;
                     }
 
-                    const domPrice = h.dominant_outcome === 'YES' ? h.yes_side.average_entry_price : h.no_side.average_entry_price;
+                    const yesSide = h.yes_side || {};
+                    const noSide = h.no_side || {};
+                    const yesVal = Number(yesSide.total_value_usdc || 0);
+                    const noVal = Number(noSide.total_value_usdc || 0);
+                    const yesWhales = Number(yesSide.whale_count || 0);
+                    const noWhales = Number(noSide.whale_count || 0);
+                    const yesEntry = Number(yesSide.average_entry_price || 0);
+                    const noEntry = Number(noSide.average_entry_price || 0);
+                    const totalPort = Number(h.total_portfolio_usdc || (yesVal + noVal));
+
+                    const domPrice = h.dominant_outcome === 'YES' ? yesEntry : noEntry;
                     const zoneBadge = getEntryZoneBadge(h.entry_zone || (domPrice >= 0.88 ? 'AVOID_LATE_FOMO' : (domPrice > 0.75 ? 'LATE_OVERBOUGHT' : (domPrice >= 0.35 ? 'OPTIMAL_SWEET_SPOT' : 'EARLY_SPECULATIVE'))), h.potential_roi_percent || 0);
 
-                    const yesPct = h.total_portfolio_usdc > 0 ? (h.yes_side.total_value_usdc / h.total_portfolio_usdc * 100).toFixed(1) : 50.0;
-                    const noPct = h.total_portfolio_usdc > 0 ? (h.no_side.total_value_usdc / h.total_portfolio_usdc * 100).toFixed(1) : 50.0;
+                    const yesPct = totalPort > 0 ? ((yesVal / totalPort) * 100).toFixed(1) : (yesVal > 0 ? '100.0' : (noVal > 0 ? '0.0' : '50.0'));
+                    const noPct = totalPort > 0 ? ((noVal / totalPort) * 100).toFixed(1) : (noVal > 0 ? '100.0' : (yesVal > 0 ? '0.0' : '50.0'));
 
                     const renderWhalesList = (whales) => {
                         if (!whales || whales.length === 0) return '<div class="text-xs text-gray-500 italic py-1">No whales in this side</div>';
-                        return whales.map(w => `
+                        return whales.map(w => {
+                            const wVal = Number(w.cur_value || 0);
+                            const wWin = Number(w.win_rate || 0.5);
+                            const wPrice = Number(w.avg_price || 0);
+                            const addrStr = w.address ? (w.address.substring(0, 6) + '...' + w.address.substring(38)) : 'Unknown';
+                            return `
                             <div class="flex items-center justify-between text-xs py-1 border-b border-gray-800/40 last:border-0 font-mono">
                                 <div class="flex items-center gap-1.5">
-                                    <span class="text-gray-200 font-sans font-semibold">${w.label || w.address.substring(0, 6) + '...' + w.address.substring(38)}</span>
-                                    <span class="text-[10px] text-emerald-400 font-bold">🎯 ${(w.win_rate * 100).toFixed(0)}%</span>
+                                    <span class="text-gray-200 font-sans font-semibold">${w.label || addrStr}</span>
+                                    <span class="text-[10px] text-emerald-400 font-bold">🎯 ${(wWin * 100).toFixed(0)}%</span>
                                 </div>
                                 <div class="text-right">
-                                    <span class="text-white font-bold">$${w.cur_value.toLocaleString()}</span>
-                                    <span class="text-[10px] text-gray-400 block">@ ${w.avg_price}</span>
+                                    <span class="text-white font-bold">$${wVal.toLocaleString()}</span>
+                                    <span class="text-[10px] text-gray-400 block">@ ${wPrice}</span>
                                 </div>
-                            </div>
-                        `).join('');
+                            </div>`;
+                        }).join('');
                     };
 
                     return `
@@ -739,8 +772,8 @@
                                 <div class="flex flex-wrap items-center gap-2">
                                     ${verdictBadge}
                                     ${zoneBadge}
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">🐋 ${h.total_whales_count} Whales</span>
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300 font-bold">$${h.total_portfolio_usdc.toLocaleString()} USDC</span>
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">🐋 ${h.total_whales_count || (yesWhales + noWhales)} Whales</span>
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300 font-bold">$${totalPort.toLocaleString()} USDC</span>
                                 </div>
 
                                 <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
@@ -753,7 +786,7 @@
                             <div class="flex items-center gap-3 bg-gray-900/90 px-4 py-2 rounded-xl border border-gray-800">
                                 <div class="text-right">
                                     <div class="text-[10px] text-gray-400 uppercase tracking-wider">CONVICTION</div>
-                                    <div class="text-2xl font-black font-mono ${h.confidence_score >= 70 ? 'text-emerald-400' : 'text-amber-400'}">${h.confidence_score}<span class="text-xs font-normal text-gray-500">/100</span></div>
+                                    <div class="text-2xl font-black font-mono ${(h.confidence_score || 0) >= 70 ? 'text-emerald-400' : 'text-amber-400'}">${h.confidence_score || 50}<span class="text-xs font-normal text-gray-500">/100</span></div>
                                 </div>
                             </div>
                         </div>
@@ -761,8 +794,8 @@
                         <!-- Visual Dominance Bar -->
                         <div class="space-y-1">
                             <div class="flex justify-between text-[11px] font-mono font-bold">
-                                <span class="text-emerald-400">🟢 YES: ${yesPct}% ($${h.yes_side.total_value_usdc.toLocaleString()} USDC • ${h.yes_side.whale_count} Whale)</span>
-                                <span class="text-rose-400">🔴 NO: ${noPct}% ($${h.no_side.total_value_usdc.toLocaleString()} USDC • ${h.no_side.whale_count} Whale)</span>
+                                <span class="text-emerald-400">🟢 YES: ${yesPct}% ($${yesVal.toLocaleString()} USDC • ${yesWhales} Whale)</span>
+                                <span class="text-rose-400">🔴 NO: ${noPct}% ($${noVal.toLocaleString()} USDC • ${noWhales} Whale)</span>
                             </div>
                             <div class="w-full h-3 rounded-full bg-gray-800 overflow-hidden flex">
                                 <div class="bg-emerald-500 h-full transition-all duration-500" style="width: ${yesPct}%"></div>
@@ -777,15 +810,15 @@
                                 <div class="flex items-center justify-between border-b border-emerald-500/20 pb-2">
                                     <div class="flex items-center gap-2">
                                         <span class="px-2 py-0.5 rounded text-xs font-black bg-emerald-500 text-gray-950">YES</span>
-                                        <span class="text-xs text-emerald-400 font-bold">${h.yes_side.whale_count} Whale(s)</span>
+                                        <span class="text-xs text-emerald-400 font-bold">${yesWhales} Whale(s)</span>
                                     </div>
                                     <div class="text-right text-xs font-mono">
-                                        <span class="text-white font-bold">$${h.yes_side.total_value_usdc.toLocaleString()}</span>
-                                        <span class="text-gray-400 text-[10px] block">Avg Entry: ${h.yes_side.average_entry_price}</span>
+                                        <span class="text-white font-bold">$${yesVal.toLocaleString()}</span>
+                                        <span class="text-gray-400 text-[10px] block">Avg Entry: ${yesEntry}</span>
                                     </div>
                                 </div>
                                 <div class="space-y-1 pt-1">
-                                    ${renderWhalesList(h.yes_side.whales)}
+                                    ${renderWhalesList(yesSide.whales || [])}
                                 </div>
                             </div>
 
@@ -794,15 +827,15 @@
                                 <div class="flex items-center justify-between border-b border-rose-500/20 pb-2">
                                     <div class="flex items-center gap-2">
                                         <span class="px-2 py-0.5 rounded text-xs font-black bg-rose-500 text-white">NO</span>
-                                        <span class="text-xs text-rose-400 font-bold">${h.no_side.whale_count} Whale(s)</span>
+                                        <span class="text-xs text-rose-400 font-bold">${noWhales} Whale(s)</span>
                                     </div>
                                     <div class="text-right text-xs font-mono">
-                                        <span class="text-white font-bold">$${h.no_side.total_value_usdc.toLocaleString()}</span>
-                                        <span class="text-gray-400 text-[10px] block">Avg Entry: ${h.no_side.average_entry_price}</span>
+                                        <span class="text-white font-bold">$${noVal.toLocaleString()}</span>
+                                        <span class="text-gray-400 text-[10px] block">Avg Entry: ${noEntry}</span>
                                     </div>
                                 </div>
                                 <div class="space-y-1 pt-1">
-                                    ${renderWhalesList(h.no_side.whales)}
+                                    ${renderWhalesList(noSide.whales || [])}
                                 </div>
                             </div>
                         </div>
@@ -810,9 +843,9 @@
                         <!-- AI Summary -->
                         <div class="bg-gray-950/70 p-3 rounded-lg border border-gray-800 text-xs text-gray-300 leading-relaxed font-sans flex items-start justify-between gap-3">
                             <div>
-                                <span class="text-amber-400 font-semibold">Holdings Intelligence:</span> ${h.ai_summary}
+                                <span class="text-amber-400 font-semibold">Holdings Intelligence:</span> ${h.ai_summary || 'Analysis in progress...'}
                             </div>
-                            <button onclick="copyPrompt('${encodeURIComponent(h.ai_summary)}')" class="text-indigo-400 hover:text-indigo-300 shrink-0 flex items-center gap-1 font-medium text-[11px]">
+                            <button onclick="copyPrompt('${encodeURIComponent(h.ai_summary || '')}')" class="text-indigo-400 hover:text-indigo-300 shrink-0 flex items-center gap-1 font-medium text-[11px]">
                                 <i data-lucide="copy" class="w-3.5 h-3.5"></i>
                                 <span>Copy</span>
                             </button>
@@ -826,12 +859,13 @@
                     <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
                         <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-amber-400"></i>
                         <h4 class="text-sm font-semibold text-gray-300">Unable to load portfolio holdings radar</h4>
-                        <p class="text-xs text-gray-500 mt-1">Poller is currently syncing whale positions. Click below to retry.</p>
+                        <p class="text-xs text-gray-500 mt-1">Make sure tracked whales have open positions or click "Sync" in Whale Profiles.</p>
                         <button onclick="loadHoldingsConsensus(true)" class="mt-3 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold">Retry</button>
                     </div>`;
                 lucide.createIcons();
             }
         }
+
 
 
         // Load Live Whale Trades Feed
