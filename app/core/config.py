@@ -22,17 +22,18 @@ class Settings(BaseSettings):
     POLYMARKET_GAMMA_API_BASE: str = "https://gamma-api.polymarket.com"
 
     # Worker & Discovery Settings
-    POLLING_INTERVAL_SECONDS: int = 45
+    POLLING_INTERVAL_SECONDS: int = 300
     ENABLE_BACKGROUND_POLLER: bool = True
     ENABLE_AUTO_DISCOVERY: bool = True
-    AUTO_DISCOVERY_INTERVAL_RUNS: int = 80
+    AUTO_DISCOVERY_INTERVAL_RUNS: int = 20
     MAX_NEW_WHALES_PER_DISCOVERY: int = 5
     REQUEST_TIMEOUT_SECONDS: float = 15.0
     MAX_RETRIES: int = 3
 
     # In-Memory Cache (For Low-spec VPS optimization)
-    CACHE_TTL_SECONDS: int = 15
+    CACHE_TTL_SECONDS: int = 60
     ENABLE_CACHE: bool = True
+
 
     # Security & Authentication
     API_KEY: Optional[str] = None

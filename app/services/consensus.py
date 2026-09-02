@@ -13,8 +13,10 @@ from app.schemas.consensus import (
     ActionableDecision,
     ConsensusSignalResponse,
     ConvictionTierEnum,
+    EntryZoneEnum,
     MarketHoldingsConsensusResponse,
     MarketVelocity,
+
     OutcomeHoldingsBreakdown,
     ParticipatingWhaleInfo,
     RecommendedActionEnum,
@@ -354,14 +356,26 @@ class ConsensusService:
             suggested_max_entry = min(0.92, round(avg_price + 0.05, 4))
             potential_roi = round(((1.0 - avg_price) / avg_price * 100), 1) if avg_price > 0 else 0.0
 
+            # Sweet Spot Entry Zone Classification
+            if avg_price >= 0.88:
+                entry_zone = EntryZoneEnum.AVOID_LATE_FOMO
+            elif avg_price > 0.75:
+                entry_zone = EntryZoneEnum.LATE_OVERBOUGHT
+            elif avg_price >= 0.35:
+                entry_zone = EntryZoneEnum.OPTIMAL_SWEET_SPOT
+            else:
+                entry_zone = EntryZoneEnum.EARLY_SPECULATIVE
+
             actionable_decision = ActionableDecision(
                 recommended_action=recommended_action,
                 risk_tier=risk_tier,
+                entry_zone=entry_zone,
                 suggested_max_entry_price=suggested_max_entry,
                 current_entry_price=round(avg_price, 4),
                 potential_roi_percent=potential_roi,
                 urgency=urgency,
             )
+
 
             # Generate structured AI rationale for Hermes LLM reasoning
             market_title = dominant_list[0].market_title or condition_id
@@ -579,6 +593,17 @@ class ConsensusService:
                     f"${no_breakdown.total_value_usdc:,.2f} USDC ({dom_pct:.1f}% dominance, avg entry: {no_breakdown.average_entry_price:.3f})."
                 )
 
+            dominant_avg_price = yes_breakdown.average_entry_price if dominant_outcome == "YES" else no_breakdown.average_entry_price
+            holdings_roi = round(((1.0 - dominant_avg_price) / dominant_avg_price * 100), 1) if dominant_avg_price > 0 else 0.0
+            if dominant_avg_price >= 0.88:
+                holdings_entry_zone = EntryZoneEnum.AVOID_LATE_FOMO
+            elif dominant_avg_price > 0.75:
+                holdings_entry_zone = EntryZoneEnum.LATE_OVERBOUGHT
+            elif dominant_avg_price >= 0.35:
+                holdings_entry_zone = EntryZoneEnum.OPTIMAL_SWEET_SPOT
+            else:
+                holdings_entry_zone = EntryZoneEnum.EARLY_SPECULATIVE
+
             results.append(
                 MarketHoldingsConsensusResponse(
                     condition_id=condition_id,
@@ -589,12 +614,15 @@ class ConsensusService:
                     dominant_outcome=dominant_outcome,
                     dominance_percentage=round(dom_pct, 1),
                     verdict=verdict,
+                    entry_zone=holdings_entry_zone,
+                    potential_roi_percent=holdings_roi,
                     confidence_score=conf_score,
                     yes_side=yes_breakdown,
                     no_side=no_breakdown,
                     ai_summary=ai_summary,
                 )
             )
+
 
         # Sort: markets with more whales first, then highest portfolio value
         results.sort(key=lambda x: (x.total_whales_count, x.total_portfolio_usdc), reverse=True)

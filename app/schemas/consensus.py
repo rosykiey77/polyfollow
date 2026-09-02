@@ -44,13 +44,22 @@ class RiskTierEnum(str, Enum):
     HIGH = "HIGH"
 
 
+class EntryZoneEnum(str, Enum):
+    OPTIMAL_SWEET_SPOT = "OPTIMAL_SWEET_SPOT"
+    EARLY_SPECULATIVE = "EARLY_SPECULATIVE"
+    LATE_OVERBOUGHT = "LATE_OVERBOUGHT"
+    AVOID_LATE_FOMO = "AVOID_LATE_FOMO"
+
+
 class ActionableDecision(BaseModel):
     recommended_action: RecommendedActionEnum
     risk_tier: RiskTierEnum
+    entry_zone: EntryZoneEnum = EntryZoneEnum.OPTIMAL_SWEET_SPOT
     suggested_max_entry_price: float
     current_entry_price: float
     potential_roi_percent: float
     urgency: str = Field("MEDIUM", description="LOW, MEDIUM, HIGH, or CRITICAL")
+
 
 
 class SmartMoneyBreakdown(BaseModel):
@@ -138,7 +147,10 @@ class MarketHoldingsConsensusResponse(BaseModel):
     dominant_outcome: str
     dominance_percentage: float
     verdict: str
+    entry_zone: EntryZoneEnum = EntryZoneEnum.OPTIMAL_SWEET_SPOT
+    potential_roi_percent: float = 0.0
     confidence_score: float
     yes_side: OutcomeHoldingsBreakdown
     no_side: OutcomeHoldingsBreakdown
     ai_summary: str
+
