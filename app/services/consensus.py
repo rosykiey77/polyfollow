@@ -101,14 +101,12 @@ class ConsensusService:
         wallets_res = await db.execute(select(Wallet).where(Wallet.address.in_(wallet_addresses)))
         wallets_map = {w.address: w for w in wallets_res.scalars().all()}
 
-        # Get latest snapshots for win rates
+        # Get snapshots for win rates (1 row per wallet)
         snapshots_res = await db.execute(
-            select(Snapshot).where(Snapshot.wallet_address.in_(wallet_addresses)).order_by(Snapshot.snapshot_date.desc())
+            select(Snapshot).where(Snapshot.wallet_address.in_(wallet_addresses))
         )
-        snapshots_map: dict[str, float] = {}
-        for s in snapshots_res.scalars().all():
-            if s.wallet_address not in snapshots_map:
-                snapshots_map[s.wallet_address] = s.win_rate
+        snapshots_map = {s.wallet_address: s.win_rate for s in snapshots_res.scalars().all()}
+
 
         # 3. Group trades by condition_id
         markets: dict[str, list[Trade]] = defaultdict(list)
@@ -411,17 +409,13 @@ class ConsensusService:
         pos_res = await db.execute(pos_query)
         positions = pos_res.scalars().all()
 
-        # 2. Fetch wallet metadata & latest snapshots
+        # 2. Fetch wallet metadata & snapshots (1 row per wallet)
         wallets_res = await db.execute(select(Wallet))
         wallets_map = {w.address: w for w in wallets_res.scalars().all()}
 
-        snaps_res = await db.execute(
-            select(Snapshot).order_by(Snapshot.snapshot_date.desc())
-        )
-        snaps_map: dict[str, Snapshot] = {}
-        for sn in snaps_res.scalars().all():
-            if sn.wallet_address not in snaps_map:
-                snaps_map[sn.wallet_address] = sn
+        snaps_res = await db.execute(select(Snapshot))
+        snaps_map = {s.wallet_address: s for s in snaps_res.scalars().all()}
+
 
         # 3. Group positions by condition_id
         market_groups: dict[str, list[Position]] = defaultdict(list)

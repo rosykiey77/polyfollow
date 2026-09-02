@@ -54,7 +54,6 @@ async def _build_wallet_response(wallet: Wallet, db: AsyncSession, snap: Snapsho
         snap_stmt = (
             select(Snapshot)
             .where(Snapshot.wallet_address == wallet.address)
-            .order_by(Snapshot.snapshot_date.desc())
             .limit(1)
         )
         snap_res = await db.execute(snap_stmt)
@@ -83,22 +82,16 @@ async def list_wallets(
     if not wallets:
         return []
 
-    # Single batch query for snapshots to eliminate N+1 database queries
+    # Single batch query for snapshots (1 row per wallet)
     addresses = [w.address for w in wallets]
-    snap_stmt = (
-        select(Snapshot)
-        .where(Snapshot.wallet_address.in_(addresses))
-        .order_by(Snapshot.snapshot_date.desc())
-    )
+    snap_stmt = select(Snapshot).where(Snapshot.wallet_address.in_(addresses))
     snap_res = await db.execute(snap_stmt)
-    latest_snapshots: dict[str, Snapshot] = {}
-    for s in snap_res.scalars().all():
-        if s.wallet_address not in latest_snapshots:
-            latest_snapshots[s.wallet_address] = s
+    latest_snapshots = {s.wallet_address: s for s in snap_res.scalars().all()}
 
     responses = [_build_wallet_response_from_snap(w, latest_snapshots.get(w.address)) for w in wallets]
     await memory_cache.set(cache_key, responses, ttl=settings.CACHE_TTL_SECONDS)
     return responses
+
 
 
 

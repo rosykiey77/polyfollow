@@ -18,8 +18,9 @@ class Snapshot(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     wallet_address: Mapped[str] = mapped_column(
-        String(42), ForeignKey("wallets.address", ondelete="CASCADE"), index=True
+        String(42), ForeignKey("wallets.address", ondelete="CASCADE"), unique=True, index=True
     )
+
     win_rate: Mapped[float] = mapped_column(Float, default=0.0)
     total_volume_usdc: Mapped[float] = mapped_column(Float, default=0.0)
     total_pnl_usdc: Mapped[float] = mapped_column(Float, default=0.0)

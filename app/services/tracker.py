@@ -306,19 +306,35 @@ class TrackerService:
 
         win_rate = max(0.0, min(1.0, round(win_rate, 4)))
 
-        snapshot = Snapshot(
-            id=str(uuid.uuid4()),
-            wallet_address=address,
-            win_rate=win_rate,
-            total_volume_usdc=total_volume,
-            total_pnl_usdc=total_pnl,
-            total_trades_count=total_trades,
-            active_positions_count=active_positions_count,
-            snapshot_date=datetime.datetime.now(datetime.timezone.utc),
-        )
-        db.add(snapshot)
+        # In-Place Upsert: Check if snapshot already exists for this wallet
+        snap_stmt = select(Snapshot).where(Snapshot.wallet_address == address).limit(1)
+        existing_snap_res = await db.execute(snap_stmt)
+        snapshot = existing_snap_res.scalar_one_or_none()
+
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        if snapshot is not None:
+            snapshot.win_rate = win_rate
+            snapshot.total_volume_usdc = total_volume
+            snapshot.total_pnl_usdc = total_pnl
+            snapshot.total_trades_count = total_trades
+            snapshot.active_positions_count = active_positions_count
+            snapshot.snapshot_date = now_utc
+        else:
+            snapshot = Snapshot(
+                id=str(uuid.uuid4()),
+                wallet_address=address,
+                win_rate=win_rate,
+                total_volume_usdc=total_volume,
+                total_pnl_usdc=total_pnl,
+                total_trades_count=total_trades,
+                active_positions_count=active_positions_count,
+                snapshot_date=now_utc,
+            )
+            db.add(snapshot)
+
         await db.flush()
         return snapshot
+
 
     async def sync_wallet(self, db: AsyncSession, wallet_address: str) -> dict[str, Any]:
         """Perform full synchronization for a single wallet."""

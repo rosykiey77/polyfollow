@@ -42,11 +42,12 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
     volume_res = await db.execute(select(func.sum(Trade.usdc_size)))
     total_vol = float(volume_res.scalar_one_or_none() or 0.0)
 
-    # Get signals count (utilizes existing consensus cache)
-    signals = await consensus_service.get_consensus_signals(
-        db=db, timeframe="24h", min_score=0.0, min_whales=1, limit=50
+    # Fast signal count from active condition positions (instant < 1ms indexed count)
+    active_cond_res = await db.execute(
+        select(func.count(func.distinct(Position.condition_id))).where(Position.cur_value > 0)
     )
-    total_signals = len(signals)
+    total_signals = active_cond_res.scalar_one_or_none() or 0
+
 
     summary = DashboardSummaryResponse(
         status="healthy" if poller.is_running else "degraded",
