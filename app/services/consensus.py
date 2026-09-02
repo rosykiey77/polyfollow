@@ -462,166 +462,170 @@ class ConsensusService:
         results: list[MarketHoldingsConsensusResponse] = []
 
         for condition_id, pos_list in market_groups.items():
-            market_title = pos_list[0].market_title or condition_id
-            market_slug = pos_list[0].market_slug
+            try:
+                market_title = pos_list[0].market_title or condition_id
+                market_slug = pos_list[0].market_slug
 
-            # Group by outcome (YES vs NO vs other)
-            outcome_whales: dict[str, list[Position]] = defaultdict(list)
-            unique_whale_addresses = set()
+                # Group by outcome (YES vs NO vs other)
+                outcome_whales: dict[str, list[Position]] = defaultdict(list)
+                unique_whale_addresses = set()
 
-            for p in pos_list:
-                norm_outcome = (p.outcome or "YES").strip().upper()
-                outcome_whales[norm_outcome].append(p)
-                unique_whale_addresses.add(p.wallet_address)
+                for p in pos_list:
+                    norm_outcome = (p.outcome or "YES").strip().upper()
+                    outcome_whales[norm_outcome].append(p)
+                    unique_whale_addresses.add(p.wallet_address)
 
-            total_whales_count = len(unique_whale_addresses)
-            if total_whales_count < min_whales:
+                total_whales_count = len(unique_whale_addresses)
+                if total_whales_count < min_whales:
+                    continue
+
+                # Build breakdown helper
+                def _build_outcome_breakdown(outcome_str: str) -> OutcomeHoldingsBreakdown:
+                    plist = outcome_whales.get(outcome_str, [])
+                    w_infos: list[WhaleHoldingInfo] = []
+                    total_val = 0.0
+                    total_shares = 0.0
+                    total_pnl = 0.0
+                    weighted_entry_sum = 0.0
+                    current_p = 0.0
+
+                    for pos in plist:
+                        w = wallets_map.get(pos.wallet_address)
+                        sn = snaps_map.get(pos.wallet_address)
+                        w_rate = sn.win_rate if sn else 0.50
+                        w_vol = sn.total_volume_usdc if sn else pos.cur_value
+                        w_trades = sn.total_trades_count if sn else 1
+
+                        arch, tier = self._classify_whale_archetype(
+                            win_rate=w_rate, size_usdc=w_vol, trade_count=w_trades
+                        )
+
+                        val = float(pos.cur_value or 0.0)
+                        sz = float(pos.size or 0.0)
+                        entry_p = float(pos.avg_price or 0.0)
+                        cur_p = float(pos.current_price or 0.0)
+                        pnl = float(pos.unrealized_pnl or 0.0)
+
+                        total_val += val
+                        total_shares += sz
+                        total_pnl += pnl
+                        weighted_entry_sum += (entry_p * val)
+                        if cur_p > 0:
+                            current_p = cur_p
+
+                        w_infos.append(
+                            WhaleHoldingInfo(
+                                address=pos.wallet_address,
+                                label=w.label if w else None,
+                                size=round(sz, 2),
+                                cur_value=round(val, 2),
+                                avg_price=round(entry_p, 4),
+                                current_price=round(cur_p, 4),
+                                unrealized_pnl=round(pnl, 2),
+                                win_rate=round(w_rate, 4),
+                                archetype=arch.value,
+                                conviction_tier=tier.value,
+                            )
+                        )
+
+                    avg_entry = (weighted_entry_sum / total_val) if total_val > 0 else 0.0
+                    # Sort whales in breakdown by position value descending
+                    w_infos.sort(key=lambda x: x.cur_value, reverse=True)
+
+                    return OutcomeHoldingsBreakdown(
+                        outcome=outcome_str,
+                        whale_count=len(plist),
+                        total_value_usdc=round(total_val, 2),
+                        total_shares_size=round(total_shares, 2),
+                        average_entry_price=round(avg_entry, 4),
+                        current_price=round(current_p, 4),
+                        total_unrealized_pnl=round(total_pnl, 2),
+                        whales=w_infos,
+                    )
+
+                yes_breakdown = _build_outcome_breakdown("YES")
+                no_breakdown = _build_outcome_breakdown("NO")
+
+                total_portfolio_usdc = round(yes_breakdown.total_value_usdc + no_breakdown.total_value_usdc, 2)
+                if total_portfolio_usdc <= 0:
+                    total_portfolio_usdc = sum(float(p.cur_value or 0.0) for p in pos_list)
+
+                # Dominance & Verdict calculation
+                if yes_breakdown.total_value_usdc >= no_breakdown.total_value_usdc:
+                    dominant_outcome = "YES"
+                    dom_pct = (yes_breakdown.total_value_usdc / total_portfolio_usdc * 100.0) if total_portfolio_usdc > 0 else 50.0
+                else:
+                    dominant_outcome = "NO"
+                    dom_pct = (no_breakdown.total_value_usdc / total_portfolio_usdc * 100.0) if total_portfolio_usdc > 0 else 50.0
+
+                # Determine Verdict
+                if yes_breakdown.whale_count >= 2 and no_breakdown.whale_count == 0:
+                    verdict = "STRONG_YES_CONVERGENCE"
+                elif no_breakdown.whale_count >= 2 and yes_breakdown.whale_count == 0:
+                    verdict = "STRONG_NO_CONVERGENCE"
+                elif yes_breakdown.whale_count >= 1 and no_breakdown.whale_count >= 1:
+                    verdict = "WHALE_BATTLE_CONFLICT"
+                elif yes_breakdown.whale_count == 1 and no_breakdown.whale_count == 0:
+                    verdict = "SINGLE_WHALE_YES"
+                else:
+                    verdict = "SINGLE_WHALE_NO"
+
+                # Confidence score (0 to 100)
+                base_score = 40.0
+                whale_multiplier = min(40.0, total_whales_count * 12.0)
+                dom_weight = (dom_pct / 100.0) * 20.0
+                conflict_penalty = 25.0 if verdict == "WHALE_BATTLE_CONFLICT" else 0.0
+                conf_score = max(10.0, min(99.0, round(base_score + whale_multiplier + dom_weight - conflict_penalty, 1)))
+
+                # AI Summary
+                if verdict == "WHALE_BATTLE_CONFLICT":
+                    ai_summary = (
+                        f"⚔️ Whale Battle Conflict: {yes_breakdown.whale_count} whale(s) hold YES (${yes_breakdown.total_value_usdc:,.2f}) "
+                        f"versus {no_breakdown.whale_count} whale(s) holding NO (${no_breakdown.total_value_usdc:,.2f}). Market is heavily contested."
+                    )
+                elif dominant_outcome == "YES":
+                    ai_summary = (
+                        f"🏆 Strong YES Consensus: {yes_breakdown.whale_count} tracked whale(s) hold YES positions totaling "
+                        f"${yes_breakdown.total_value_usdc:,.2f} USDC ({dom_pct:.1f}% dominance, avg entry: {yes_breakdown.average_entry_price:.3f})."
+                    )
+                else:
+                    ai_summary = (
+                        f"🛡️ Strong NO Consensus: {no_breakdown.whale_count} tracked whale(s) hold NO positions totaling "
+                        f"${no_breakdown.total_value_usdc:,.2f} USDC ({dom_pct:.1f}% dominance, avg entry: {no_breakdown.average_entry_price:.3f})."
+                    )
+
+                dominant_avg_price = yes_breakdown.average_entry_price if dominant_outcome == "YES" else no_breakdown.average_entry_price
+                holdings_roi = round(((1.0 - dominant_avg_price) / dominant_avg_price * 100), 1) if dominant_avg_price > 0 else 0.0
+                if dominant_avg_price >= 0.88:
+                    holdings_entry_zone = EntryZoneEnum.AVOID_LATE_FOMO
+                elif dominant_avg_price > 0.75:
+                    holdings_entry_zone = EntryZoneEnum.LATE_OVERBOUGHT
+                elif dominant_avg_price >= 0.35:
+                    holdings_entry_zone = EntryZoneEnum.OPTIMAL_SWEET_SPOT
+                else:
+                    holdings_entry_zone = EntryZoneEnum.EARLY_SPECULATIVE
+
+                results.append(
+                    MarketHoldingsConsensusResponse(
+                        condition_id=condition_id,
+                        market_title=market_title,
+                        market_slug=market_slug,
+                        total_whales_count=total_whales_count,
+                        total_portfolio_usdc=total_portfolio_usdc,
+                        dominant_outcome=dominant_outcome,
+                        dominance_percentage=round(dom_pct, 1),
+                        verdict=verdict,
+                        entry_zone=holdings_entry_zone,
+                        potential_roi_percent=holdings_roi,
+                        confidence_score=conf_score,
+                        yes_side=yes_breakdown,
+                        no_side=no_breakdown,
+                        ai_summary=ai_summary,
+                    )
+                )
+            except Exception as market_err:
                 continue
 
-            # Build breakdown helper
-            def _build_outcome_breakdown(outcome_str: str) -> OutcomeHoldingsBreakdown:
-                plist = outcome_whales.get(outcome_str, [])
-                w_infos: list[WhaleHoldingInfo] = []
-                total_val = 0.0
-                total_shares = 0.0
-                total_pnl = 0.0
-                weighted_entry_sum = 0.0
-                current_p = 0.0
-
-                for pos in plist:
-                    w = wallets_map.get(pos.wallet_address)
-                    sn = snaps_map.get(pos.wallet_address)
-                    w_rate = sn.win_rate if sn else 0.50
-                    w_vol = sn.total_volume_usdc if sn else pos.cur_value
-                    w_trades = sn.total_trades_count if sn else 1
-
-                    arch, tier = self._classify_whale_archetype(
-                        win_rate=w_rate, size_usdc=w_vol, trade_count=w_trades
-                    )
-
-                    val = float(pos.cur_value or 0.0)
-                    sz = float(pos.size or 0.0)
-                    entry_p = float(pos.avg_price or 0.0)
-                    cur_p = float(pos.current_price or 0.0)
-                    pnl = float(pos.unrealized_pnl or 0.0)
-
-                    total_val += val
-                    total_shares += sz
-                    total_pnl += pnl
-                    weighted_entry_sum += (entry_p * val)
-                    if cur_p > 0:
-                        current_p = cur_p
-
-                    w_infos.append(
-                        WhaleHoldingInfo(
-                            address=pos.wallet_address,
-                            label=w.label if w else None,
-                            size=round(sz, 2),
-                            cur_value=round(val, 2),
-                            avg_price=round(entry_p, 4),
-                            current_price=round(cur_p, 4),
-                            unrealized_pnl=round(pnl, 2),
-                            win_rate=round(w_rate, 4),
-                            archetype=arch.value,
-                            conviction_tier=tier.value,
-                        )
-                    )
-
-                avg_entry = (weighted_entry_sum / total_val) if total_val > 0 else 0.0
-                # Sort whales in breakdown by position value descending
-                w_infos.sort(key=lambda x: x.cur_value, reverse=True)
-
-                return OutcomeHoldingsBreakdown(
-                    outcome=outcome_str,
-                    whale_count=len(plist),
-                    total_value_usdc=round(total_val, 2),
-                    total_shares_size=round(total_shares, 2),
-                    average_entry_price=round(avg_entry, 4),
-                    current_price=round(current_p, 4),
-                    total_unrealized_pnl=round(total_pnl, 2),
-                    whales=w_infos,
-                )
-
-            yes_breakdown = _build_outcome_breakdown("YES")
-            no_breakdown = _build_outcome_breakdown("NO")
-
-            total_portfolio_usdc = round(yes_breakdown.total_value_usdc + no_breakdown.total_value_usdc, 2)
-            if total_portfolio_usdc <= 0:
-                total_portfolio_usdc = sum(float(p.cur_value or 0.0) for p in pos_list)
-
-            # Dominance & Verdict calculation
-            if yes_breakdown.total_value_usdc >= no_breakdown.total_value_usdc:
-                dominant_outcome = "YES"
-                dom_pct = (yes_breakdown.total_value_usdc / total_portfolio_usdc * 100.0) if total_portfolio_usdc > 0 else 50.0
-            else:
-                dominant_outcome = "NO"
-                dom_pct = (no_breakdown.total_value_usdc / total_portfolio_usdc * 100.0) if total_portfolio_usdc > 0 else 50.0
-
-            # Determine Verdict
-            if yes_breakdown.whale_count >= 2 and no_breakdown.whale_count == 0:
-                verdict = "STRONG_YES_CONVERGENCE"
-            elif no_breakdown.whale_count >= 2 and yes_breakdown.whale_count == 0:
-                verdict = "STRONG_NO_CONVERGENCE"
-            elif yes_breakdown.whale_count >= 1 and no_breakdown.whale_count >= 1:
-                verdict = "WHALE_BATTLE_CONFLICT"
-            elif yes_breakdown.whale_count == 1 and no_breakdown.whale_count == 0:
-                verdict = "SINGLE_WHALE_YES"
-            else:
-                verdict = "SINGLE_WHALE_NO"
-
-            # Confidence score (0 to 100)
-            base_score = 40.0
-            whale_multiplier = min(40.0, total_whales_count * 12.0)
-            dom_weight = (dom_pct / 100.0) * 20.0
-            conflict_penalty = 25.0 if verdict == "WHALE_BATTLE_CONFLICT" else 0.0
-            conf_score = max(10.0, min(99.0, round(base_score + whale_multiplier + dom_weight - conflict_penalty, 1)))
-
-            # AI Summary
-            if verdict == "WHALE_BATTLE_CONFLICT":
-                ai_summary = (
-                    f"⚔️ Whale Battle Conflict: {yes_breakdown.whale_count} whale(s) hold YES (${yes_breakdown.total_value_usdc:,.2f}) "
-                    f"versus {no_breakdown.whale_count} whale(s) holding NO (${no_breakdown.total_value_usdc:,.2f}). Market is heavily contested."
-                )
-            elif dominant_outcome == "YES":
-                ai_summary = (
-                    f"🏆 Strong YES Consensus: {yes_breakdown.whale_count} tracked whale(s) hold YES positions totaling "
-                    f"${yes_breakdown.total_value_usdc:,.2f} USDC ({dom_pct:.1f}% dominance, avg entry: {yes_breakdown.average_entry_price:.3f})."
-                )
-            else:
-                ai_summary = (
-                    f"🛡️ Strong NO Consensus: {no_breakdown.whale_count} tracked whale(s) hold NO positions totaling "
-                    f"${no_breakdown.total_value_usdc:,.2f} USDC ({dom_pct:.1f}% dominance, avg entry: {no_breakdown.average_entry_price:.3f})."
-                )
-
-            dominant_avg_price = yes_breakdown.average_entry_price if dominant_outcome == "YES" else no_breakdown.average_entry_price
-            holdings_roi = round(((1.0 - dominant_avg_price) / dominant_avg_price * 100), 1) if dominant_avg_price > 0 else 0.0
-            if dominant_avg_price >= 0.88:
-                holdings_entry_zone = EntryZoneEnum.AVOID_LATE_FOMO
-            elif dominant_avg_price > 0.75:
-                holdings_entry_zone = EntryZoneEnum.LATE_OVERBOUGHT
-            elif dominant_avg_price >= 0.35:
-                holdings_entry_zone = EntryZoneEnum.OPTIMAL_SWEET_SPOT
-            else:
-                holdings_entry_zone = EntryZoneEnum.EARLY_SPECULATIVE
-
-            results.append(
-                MarketHoldingsConsensusResponse(
-                    condition_id=condition_id,
-                    market_title=market_title,
-                    market_slug=market_slug,
-                    total_whales_count=total_whales_count,
-                    total_portfolio_usdc=total_portfolio_usdc,
-                    dominant_outcome=dominant_outcome,
-                    dominance_percentage=round(dom_pct, 1),
-                    verdict=verdict,
-                    entry_zone=holdings_entry_zone,
-                    potential_roi_percent=holdings_roi,
-                    confidence_score=conf_score,
-                    yes_side=yes_breakdown,
-                    no_side=no_breakdown,
-                    ai_summary=ai_summary,
-                )
-            )
 
 
         # Sort: markets with more whales first, then highest portfolio value

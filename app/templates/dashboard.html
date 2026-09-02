@@ -821,9 +821,18 @@
                 }).join('');
                 lucide.createIcons();
             } catch (err) {
-                container.innerHTML = `<div class="text-center py-12 text-rose-400 text-sm">Failed to load portfolio holdings radar.</div>`;
+                console.error("Error loading portfolio holdings radar:", err);
+                container.innerHTML = `
+                    <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
+                        <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-amber-400"></i>
+                        <h4 class="text-sm font-semibold text-gray-300">Unable to load portfolio holdings radar</h4>
+                        <p class="text-xs text-gray-500 mt-1">Poller is currently syncing whale positions. Click below to retry.</p>
+                        <button onclick="loadHoldingsConsensus(true)" class="mt-3 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold">Retry</button>
+                    </div>`;
+                lucide.createIcons();
             }
         }
+
 
         // Load Live Whale Trades Feed
         async function loadTrades(showSpinner = false) {
