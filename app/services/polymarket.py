@@ -37,11 +37,14 @@ def setup_dns_bypass():
         return
 
     def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-        if isinstance(host, str) and host.lower() in POLYMARKET_DOMAINS:
-            # Force IPv4 connection to verified Anycast IP
-            ip = DEFAULT_POLYMARKET_IPS[0]
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
-        return _ORIGINAL_GETADDRINFO(host, port, family, type, proto, flags)
+        try:
+            return _ORIGINAL_GETADDRINFO(host, port, family, type, proto, flags)
+        except Exception:
+            if isinstance(host, str) and host.lower() in POLYMARKET_DOMAINS:
+                ip = DEFAULT_POLYMARKET_IPS[0]
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
+            raise
+
 
     socket.getaddrinfo = patched_getaddrinfo
     _dns_initialized = True
