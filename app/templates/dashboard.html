@@ -675,16 +675,22 @@
                 lucide.createIcons();
             }
 
-            // 3. Revalidate from server
+            // 3. Revalidate from server (10s timeout)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
             try {
-                const res = await fetch(`/api/v1/signals/consensus?timeframe=${currentTimeframe}&min_score=0&limit=25`);
-                if (!res.ok) throw new Error('Failed to load signals');
+                const res = await fetch(`/api/v1/signals/consensus?timeframe=${currentTimeframe}&min_score=0&limit=25`, { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (!res.ok) throw new Error('Failed to load signals (status ' + res.status + ')');
                 const signals = await res.json();
                 localStorage.setItem(cacheKey, JSON.stringify(signals));
                 renderSignalsList(signals);
             } catch (err) {
+                clearTimeout(timeoutId);
                 console.error("Error loading consensus signals:", err);
-                if (container.children.length === 0) {
+                const hasCards = container.querySelectorAll('.glass-card').length > 0;
+                if (!hasCards) {
                     container.innerHTML = `
                         <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
                             <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-amber-400"></i>
@@ -696,6 +702,7 @@
                 }
             }
         }
+
 
 
         // Render Holdings List helper
@@ -897,27 +904,34 @@
                 lucide.createIcons();
             }
 
-            // 3. Revalidate from server
+            // 3. Revalidate from server (10s timeout)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
             try {
-                const res = await fetch('/api/v1/signals/holdings?min_whales=1&limit=30');
-                if (!res.ok) throw new Error('Failed to load holdings consensus');
+                const res = await fetch('/api/v1/signals/holdings?min_whales=1&limit=30', { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (!res.ok) throw new Error('Failed to load holdings consensus (status ' + res.status + ')');
                 const holdings = await res.json();
                 localStorage.setItem(cacheKey, JSON.stringify(holdings));
                 renderHoldingsList(holdings);
             } catch (err) {
+                clearTimeout(timeoutId);
                 console.error("Error loading portfolio holdings radar:", err);
-                if (container.children.length === 0) {
+                const hasCards = container.querySelectorAll('.glass-card').length > 0;
+                if (!hasCards) {
                     container.innerHTML = `
                         <div class="text-center py-16 bg-dark-card rounded-xl border border-gray-800">
                             <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-amber-400"></i>
                             <h4 class="text-sm font-semibold text-gray-300">Unable to load portfolio holdings radar</h4>
-                            <p class="text-xs text-gray-500 mt-1">Make sure tracked whales have open positions or click "Sync" in Whale Profiles.</p>
+                            <p class="text-xs text-gray-500 mt-1">${err.name === 'AbortError' ? 'Request timed out after 10s. Server is busy syncing.' : 'Make sure tracked whales have open positions or click "Sync" in Whale Profiles.'}</p>
                             <button onclick="loadHoldingsConsensus(true)" class="mt-3 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold">Retry</button>
                         </div>`;
                     lucide.createIcons();
                 }
             }
         }
+
 
 
 
