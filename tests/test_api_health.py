@@ -8,7 +8,8 @@ async def test_root_endpoint(async_client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     assert "version" in data
-    assert data["docs"] == "/docs"
+    assert "api_v1" in data
+    assert data["mode"] in ("headless_api", "monolith_with_ui")
 
 
 @pytest.mark.asyncio
@@ -23,11 +24,17 @@ async def test_health_check(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_dashboard_endpoint(async_client: AsyncClient):
+async def test_dashboard_endpoint_headless_behavior(async_client: AsyncClient):
+    # In headless mode (default), /dashboard returns 404
     response = await async_client.get("/dashboard")
-    assert response.status_code == 200
-    assert "text/html" in response.headers.get("content-type", "")
-    assert "POLYFOLLOW" in response.text
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_docs_disabled_in_headless_mode(async_client: AsyncClient):
+    # When ENABLE_DOCS is False (default), /docs returns 404
+    response = await async_client.get("/docs")
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

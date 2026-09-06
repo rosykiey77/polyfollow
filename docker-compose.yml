@@ -44,6 +44,8 @@ services:
 
 
       - ENABLE_BACKGROUND_POLLER=${ENABLE_BACKGROUND_POLLER:-true}
+      - ENABLE_DASHBOARD=${ENABLE_DASHBOARD:-false}
+      - ENABLE_DOCS=${ENABLE_DOCS:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - API_KEY=${API_KEY:-}
     ports:

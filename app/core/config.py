@@ -36,6 +36,10 @@ class Settings(BaseSettings):
 
 
 
+    # Headless & Documentation Controls
+    ENABLE_DASHBOARD: bool = False
+    ENABLE_DOCS: bool = False
+
     # Security & Authentication
     API_KEY: Optional[str] = None
 

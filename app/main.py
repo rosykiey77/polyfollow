@@ -30,9 +30,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Automated backend service for tracking Polymarket whale/bandar wallets and streaming signals to Hermes Agent.",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    description="Headless API backend for Polymarket whale tracking and Hermes Agent intelligence streaming.",
+    docs_url="/docs" if settings.ENABLE_DOCS else None,
+    redoc_url="/redoc" if settings.ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if settings.ENABLE_DOCS else None,
     lifespan=lifespan,
 )
 
@@ -49,24 +50,33 @@ app.add_middleware(
 )
 
 
-# Root health check endpoint
+# Root health check endpoint (Public for Docker healthcheck)
 app.include_router(health_router)
 
-# Web Dashboard endpoint (/dashboard)
-from app.api.v1.dashboard import router as dashboard_router
-app.include_router(dashboard_router)
+# Web Dashboard endpoint (/dashboard) - Enabled only if configured
+if settings.ENABLE_DASHBOARD:
+    from app.api.v1.dashboard import router as dashboard_router
+    app.include_router(dashboard_router)
+    logger.info("Web Dashboard UI enabled at /dashboard")
+else:
+    logger.info("Headless Mode: Web Dashboard UI is disabled.")
 
-# API v1 endpoints
+# API v1 endpoints (Protected with API Key dependency)
 app.include_router(api_v1_router)
 
 
 @app.get("/", tags=["Root"])
 async def root():
-    return {
+    resp = {
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "dashboard": "/dashboard",
-        "docs": "/docs",
+        "mode": "headless_api" if not settings.ENABLE_DASHBOARD else "monolith_with_ui",
         "health": "/health",
         "api_v1": "/api/v1",
     }
+    if settings.ENABLE_DASHBOARD:
+        resp["dashboard"] = "/dashboard"
+    if settings.ENABLE_DOCS:
+        resp["docs"] = "/docs"
+    return resp
+

@@ -147,6 +147,10 @@ async def get_dashboard(
     polyfollow_api_key: Optional[str] = Cookie(None),
 ):
     """Render the Polyfollow Dark Mode Intelligence Dashboard protected by API_KEY."""
+    if not settings.ENABLE_DASHBOARD:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Dashboard UI is disabled in headless mode.")
+
     expected_key = settings.API_KEY
 
     # If API_KEY is configured, enforce security
