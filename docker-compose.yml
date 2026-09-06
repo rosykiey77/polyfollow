@@ -54,9 +54,10 @@ services:
       - "8899:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 10s
       retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
