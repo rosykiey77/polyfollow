@@ -359,14 +359,20 @@ class TrackerService:
         }
 
     async def sync_all_active_wallets(self, db: AsyncSession) -> list[dict[str, Any]]:
-        """Fetch all active wallets and synchronize each with event-loop friendly throttling."""
-        result = await db.execute(select(Wallet.address).where(Wallet.is_active.is_(True)))
+        """Fetch active wallets up to MAX_TRACKED_WALLETS and synchronize with event-loop friendly throttling."""
+        query = (
+            select(Wallet.address)
+            .where(Wallet.is_active.is_(True))
+            .order_by(Wallet.updated_at.asc().nullsfirst())
+            .limit(settings.MAX_TRACKED_WALLETS)
+        )
+        result = await db.execute(query)
         active_addresses = [row[0] for row in result.fetchall()]
 
         # If no active wallets exist, seed initial top whales
         if not active_addresses:
             await self.seed_initial_wallets(db)
-            result = await db.execute(select(Wallet.address).where(Wallet.is_active.is_(True)))
+            result = await db.execute(query)
             active_addresses = [row[0] for row in result.fetchall()]
 
         results = []
