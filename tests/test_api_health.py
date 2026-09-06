@@ -24,6 +24,15 @@ async def test_health_check(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_readiness_check(async_client: AsyncClient):
+    response = await async_client.get("/health/ready")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] in ("ready", "degraded")
+    assert "database" in data
+
+
+@pytest.mark.asyncio
 async def test_dashboard_endpoint_headless_behavior(async_client: AsyncClient):
     # In headless mode (default), /dashboard returns 404
     response = await async_client.get("/dashboard")

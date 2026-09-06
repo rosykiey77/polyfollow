@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     ENABLE_AUTO_DISCOVERY: bool = True
     AUTO_DISCOVERY_INTERVAL_RUNS: int = 20
     MAX_NEW_WHALES_PER_DISCOVERY: int = 5
-    MAX_TRACKED_WALLETS: int = 30
+    MAX_WALLETS_PER_CYCLE: int = 20
+    MAX_TRACKED_WALLETS: int = 20
+    WALLET_SYNC_DELAY_SECONDS: float = 0.5
     REQUEST_TIMEOUT_SECONDS: float = 15.0
     MAX_RETRIES: int = 3
 

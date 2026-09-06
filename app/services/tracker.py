@@ -359,12 +359,12 @@ class TrackerService:
         }
 
     async def sync_all_active_wallets(self, db: AsyncSession) -> list[dict[str, Any]]:
-        """Fetch active wallets up to MAX_TRACKED_WALLETS and synchronize with event-loop friendly throttling."""
+        """Fetch prioritized active wallets up to MAX_WALLETS_PER_CYCLE and synchronize with throttling."""
         query = (
             select(Wallet.address)
             .where(Wallet.is_active.is_(True))
             .order_by(Wallet.updated_at.asc().nullsfirst())
-            .limit(settings.MAX_TRACKED_WALLETS)
+            .limit(settings.MAX_WALLETS_PER_CYCLE)
         )
         result = await db.execute(query)
         active_addresses = [row[0] for row in result.fetchall()]
@@ -382,8 +382,8 @@ class TrackerService:
                 res = await self.sync_wallet(db, address)
                 results.append(res)
                 total_new_trades += res.get("new_trades_detected", 0)
-                # Yield control to event loop so Uvicorn can serve dashboard HTTP requests immediately
-                await asyncio.sleep(0.08)
+                # Yield control to event loop so Uvicorn can serve HTTP requests immediately
+                await asyncio.sleep(settings.WALLET_SYNC_DELAY_SECONDS)
             except Exception as e:
                 logger.error("Error syncing wallet %s: %s", address, str(e), exc_info=True)
                 await db.rollback()
