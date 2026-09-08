@@ -124,9 +124,9 @@ class ConsensusService:
             )
             .group_by(Trade.condition_id)
             .having(
-                func.count(func.distinct(Trade.wallet_address)) >= min_whales,
+                func.count(Trade.wallet_address.distinct()) >= min_whales,
             )
-            .order_by(desc("total_vol"))
+            .order_by(desc(func.sum(Trade.usdc_size)))
             .limit(limit * 3)
         )
         cand_res = await db.execute(cand_query)
@@ -476,8 +476,8 @@ class ConsensusService:
             )
             .where(Position.condition_id.isnot(None), Position.cur_value > 0.0)
             .group_by(Position.condition_id)
-            .having(func.count(func.distinct(Position.wallet_address)) >= min_whales)
-            .order_by(desc("total_val"))
+            .having(func.count(Position.wallet_address.distinct()) >= min_whales)
+            .order_by(desc(func.sum(Position.cur_value)))
             .limit(limit)
         )
         cand_pos_res = await db.execute(cand_pos_query)
@@ -725,7 +725,6 @@ class ConsensusService:
         cand_query = (
             select(
                 Trade.condition_id,
-                func.upper(func.coalesce(Trade.outcome, "YES")).label("norm_outcome"),
                 func.sum(Trade.usdc_size).label("total_vol"),
             )
             .where(
@@ -733,12 +732,12 @@ class ConsensusService:
                 Trade.traded_at >= cutoff,
                 Trade.condition_id.isnot(None),
             )
-            .group_by(Trade.condition_id, func.upper(func.coalesce(Trade.outcome, "YES")))
+            .group_by(Trade.condition_id)
             .having(
                 func.sum(Trade.usdc_size) >= min_exit_usd,
-                func.count(func.distinct(Trade.wallet_address)) >= min_whales,
+                func.count(Trade.wallet_address.distinct()) >= min_whales,
             )
-            .order_by(desc("total_vol"))
+            .order_by(desc(func.sum(Trade.usdc_size)))
             .limit(limit)
         )
         cand_res = await db.execute(cand_query)
