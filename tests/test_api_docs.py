@@ -27,6 +27,7 @@ async def test_api_docs_endpoints_accessible(async_client: AsyncClient):
         assert "openapi" in openapi_data
         assert openapi_data["info"]["title"] == settings.APP_NAME
         assert "/api/v1/signals/consensus" in openapi_data["paths"]
+        assert "/api/v1/signals/exits" in openapi_data["paths"]
 
         # 4. Test Root / endpoint returns docs links
         res_root = await async_client.get("/")

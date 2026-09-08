@@ -197,3 +197,80 @@ async def test_holdings_consensus_endpoint(async_client: AsyncClient, db_session
     assert market["no_side"]["total_value_usdc"] == 4000.0
     assert "Whale Battle Conflict" in market["ai_summary"]
 
+
+@pytest.mark.asyncio
+async def test_whale_exit_radar_signals(async_client: AsyncClient, db_session: AsyncSession):
+    from app.models.position import Position
+
+    addr_dump1 = f"0x{uuid.uuid4().hex[:40]}"
+    addr_dump2 = f"0x{uuid.uuid4().hex[:40]}"
+
+    w1 = Wallet(address=addr_dump1, label="Dump Whale 1", is_active=True)
+    w2 = Wallet(address=addr_dump2, label="Dump Whale 2", is_active=True)
+    s1 = Snapshot(id=str(uuid.uuid4()), wallet_address=addr_dump1, win_rate=0.85, total_volume_usdc=80000.0, total_trades_count=30)
+    s2 = Snapshot(id=str(uuid.uuid4()), wallet_address=addr_dump2, win_rate=0.75, total_volume_usdc=150000.0, total_trades_count=50)
+    db_session.add_all([w1, w2, s1, s2])
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cond_exit = "cond_crypto_etf_approval"
+
+    # Whale 1 sells $12,000 worth of YES shares 2 hours ago
+    t_sell1 = Trade(
+        id=str(uuid.uuid4()),
+        wallet_address=addr_dump1,
+        condition_id=cond_exit,
+        market_title="Will Solana ETF be approved in 2026?",
+        market_slug="solana-etf-approved-2026",
+        side="SELL",
+        outcome="YES",
+        size=15000.0,
+        price=0.80,
+        usdc_size=12000.0,
+        traded_at=now - datetime.timedelta(hours=2),
+    )
+    # Whale 2 sells $10,000 worth of YES shares 1 hour ago
+    t_sell2 = Trade(
+        id=str(uuid.uuid4()),
+        wallet_address=addr_dump2,
+        condition_id=cond_exit,
+        market_title="Will Solana ETF be approved in 2026?",
+        market_slug="solana-etf-approved-2026",
+        side="SELL",
+        outcome="YES",
+        size=12500.0,
+        price=0.80,
+        usdc_size=10000.0,
+        traded_at=now - datetime.timedelta(hours=1),
+    )
+    db_session.add_all([t_sell1, t_sell2])
+
+    # Whale 1 has 0 remaining shares (cleared), Whale 2 also has 0 remaining shares
+    await db_session.commit()
+
+    # 1. Query /signals/exits with default params
+    res = await async_client.get("/api/v1/signals/exits?timeframe=24h&min_exit_usd=5000&min_whales=2")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) >= 1
+
+    alert = next(a for a in data if a["condition_id"] == cond_exit)
+    assert alert["outcome_exited"] == "YES"
+    assert alert["exiting_whales_count"] == 2
+    assert alert["total_exit_volume_usdc"] == 22000.0
+    assert alert["exit_type"] == "WHALE_EXODUS"
+    assert alert["urgency"] == "CRITICAL"
+    assert alert["recommended_action"] == "EMERGENCY_CLOSE"
+    assert alert["is_full_exit"] is True
+    assert len(alert["exiting_whales"]) == 2
+    assert "CRITICAL EXIT ALERT" in alert["ai_rationale"]
+
+    # 2. Test min_whales filter excludes if set too high
+    res_filtered = await async_client.get("/api/v1/signals/exits?timeframe=24h&min_whales=5")
+    assert res_filtered.status_code == 200
+    assert not any(a["condition_id"] == cond_exit for a in res_filtered.json())
+
+    # 3. Test min_exit_usd filter excludes if set too high
+    res_vol_filtered = await async_client.get("/api/v1/signals/exits?timeframe=24h&min_exit_usd=50000")
+    assert res_vol_filtered.status_code == 200
+    assert not any(a["condition_id"] == cond_exit for a in res_vol_filtered.json())
+

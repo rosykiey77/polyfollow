@@ -5,6 +5,7 @@ from app.schemas.consensus import (
     ConsensusSignalResponse,
     MarketHoldingsConsensusResponse,
     TimeframeEnum,
+    WhaleExitSignalResponse,
 )
 from app.services.consensus import consensus_service
 
@@ -74,6 +75,46 @@ async def get_holdings_consensus(
     """
     return await consensus_service.get_portfolio_holdings_consensus(
         db=db,
+        min_whales=min_whales,
+        limit=limit,
+    )
+
+
+@router.get("/exits", response_model=list[WhaleExitSignalResponse])
+async def get_whale_exit_signals(
+    timeframe: TimeframeEnum = Query(
+        TimeframeEnum.TWENTY_FOUR_HOURS,
+        description="Timeframe window for analyzing whale exit/dump flow: 1h, 6h, 24h, 7d",
+    ),
+    min_exit_usd: float = Query(
+        1000.0,
+        ge=0.0,
+        description="Minimum total USDC sold volume threshold for the market",
+    ),
+    min_whales: int = Query(
+        1,
+        ge=1,
+        le=50,
+        description="Minimum number of distinct whales selling in this market",
+    ),
+    limit: int = Query(
+        20,
+        ge=1,
+        le=100,
+        description="Maximum number of exit alerts to return",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Whale Exit & Dump Radar (TP/SL Signal Engine).
+    Detects when tracked whales execute SELL orders or clear positions on a market,
+    categorizing exit types (WHALE_EXODUS, PROFIT_TAKING, STOP_LOSS_DUMP), urgency,
+    and recommended risk-management actions (EMERGENCY_CLOSE, TRIM_50%, TIGHTEN_STOP).
+    """
+    return await consensus_service.get_whale_exit_signals(
+        db=db,
+        timeframe=timeframe.value,
+        min_exit_usd=min_exit_usd,
         min_whales=min_whales,
         limit=limit,
     )

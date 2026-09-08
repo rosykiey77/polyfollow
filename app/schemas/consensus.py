@@ -154,3 +154,54 @@ class MarketHoldingsConsensusResponse(BaseModel):
     no_side: OutcomeHoldingsBreakdown
     ai_summary: str
 
+
+class ExitTypeEnum(str, Enum):
+    WHALE_EXODUS = "WHALE_EXODUS"
+    PROFIT_TAKING = "PROFIT_TAKING"
+    STOP_LOSS_DUMP = "STOP_LOSS_DUMP"
+    PARTIAL_TRIM = "PARTIAL_TRIM"
+
+
+class ExitUrgencyEnum(str, Enum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+
+
+class ExitActionEnum(str, Enum):
+    EMERGENCY_CLOSE = "EMERGENCY_CLOSE"
+    TRIM_50 = "TRIM_50%"
+    TIGHTEN_STOP = "TIGHTEN_STOP"
+
+
+class ExitingWhaleDetail(BaseModel):
+    address: str
+    label: str | None = None
+    sold_volume_usdc: float
+    sold_shares: float
+    average_exit_price: float
+    remaining_shares: float = 0.0
+    is_position_cleared: bool = False
+    archetype: str = "STANDARD_WHALE"
+
+
+class WhaleExitSignalResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    condition_id: str
+    market_title: str | None = None
+    market_slug: str | None = None
+    outcome_exited: str
+    timeframe: str
+    exiting_whales_count: int
+    total_exit_volume_usdc: float
+    average_exit_price: float
+    exit_type: ExitTypeEnum
+    urgency: ExitUrgencyEnum
+    recommended_action: ExitActionEnum
+    is_full_exit: bool
+    exiting_whales: list[ExitingWhaleDetail]
+    ai_rationale: str
+    first_exit_at: datetime.datetime
+    last_exit_at: datetime.datetime
+

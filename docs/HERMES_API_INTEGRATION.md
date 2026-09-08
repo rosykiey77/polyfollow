@@ -88,7 +88,50 @@ Mengambil agregasi sinyal bandar terbaik berdasarkan akumulasi volume dan konver
 ]
 ```
 
-### B. Endpoint Status & Healthcheck
+### B. 🚨 Endpoint Whale Exit & Dump Radar (Proteksi TP/SL)
+Mengambil sinyal pelepasan posisi, profit taking, atau panic dump oleh bandar untuk memicu Take-Profit / Stop-Loss terotomatisasi:
+* **Method & Path:** `GET /api/v1/signals/exits`
+* **Query Parameters:**
+  * `timeframe`: `1h`, `6h`, `24h` (default: `24h`)
+  * `min_exit_usd`: Minimal total volume penjualan dalam USDC (default: `1000.0`)
+  * `min_whales`: Jumlah minimal whale yang menjual di market yang sama (default: `1`)
+* **Headers:**
+  * `X-API-Key: <API_KEY>`
+  * `Accept: application/json`
+
+#### Contoh Respons JSON:
+```json
+[
+  {
+    "condition_id": "0x1234abcd...",
+    "market_title": "Will Solana ETF be approved in 2026?",
+    "outcome_exited": "YES",
+    "timeframe": "24h",
+    "exiting_whales_count": 2,
+    "total_exit_volume_usdc": 22000.0,
+    "average_exit_price": 0.80,
+    "exit_type": "WHALE_EXODUS",
+    "urgency": "CRITICAL",
+    "recommended_action": "EMERGENCY_CLOSE",
+    "is_full_exit": true,
+    "exiting_whales": [
+      {
+        "address": "0xabc...",
+        "label": "Whale Alpha",
+        "sold_volume_usdc": 12000.0,
+        "sold_shares": 15000.0,
+        "average_exit_price": 0.80,
+        "remaining_shares": 0.0,
+        "is_position_cleared": true,
+        "archetype": "INSIDER_SPECIALIST"
+      }
+    ],
+    "ai_rationale": "CRITICAL EXIT ALERT: 2 whale(s) executed major liquidations on YES in 'Will Solana ETF be approved in 2026?' totaling $22,000 USDC within 24h. Full liquidation confirmed (0 remaining shares). Immediate exit strongly advised."
+  }
+]
+```
+
+### C. Endpoint Status & Healthcheck
 * **Method & Path:** `GET /health`
 * **Kegunaan:** Pengecekan status ketersediaan server oleh bot/monitoring tanpa perlu API Key.
 

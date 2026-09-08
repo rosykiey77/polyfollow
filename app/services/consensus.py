@@ -27,6 +27,11 @@ from app.schemas.consensus import (
     TimeframeEnum,
     WhaleArchetypeEnum,
     WhaleHoldingInfo,
+    ExitActionEnum,
+    ExitTypeEnum,
+    ExitUrgencyEnum,
+    ExitingWhaleDetail,
+    WhaleExitSignalResponse,
 )
 
 
@@ -643,6 +648,235 @@ class ConsensusService:
         final_results = results[:limit]
         await memory_cache.set(cache_key, final_results, ttl=settings.CACHE_TTL_SECONDS)
         return final_results
+
+    async def get_whale_exit_signals(
+        self,
+        db: AsyncSession,
+        timeframe: str = "24h",
+        min_exit_usd: float = 1000.0,
+        min_whales: int = 1,
+        limit: int = 20,
+    ) -> list[WhaleExitSignalResponse]:
+        """
+        Whale Exit & Dump Radar Engine.
+        Analyzes SELL trades across tracked whales within the specified timeframe window,
+        checks remaining open position balances to detect liquidations vs partial trims,
+        and generates risk-mitigation directives for Hermes AI Agent.
+        """
+        cache_key = f"signals:exits:{timeframe}:{min_exit_usd}:{min_whales}:{limit}"
+        cached = await memory_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        delta = self._parse_timeframe(timeframe)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cutoff = now - delta
+
+        # 1. Fetch SELL trades within timeframe
+        stmt = (
+            select(Trade)
+            .where(
+                Trade.side == "SELL",
+                Trade.traded_at >= cutoff,
+                Trade.condition_id.isnot(None),
+            )
+            .order_by(Trade.traded_at.desc())
+        )
+        trade_res = await db.execute(stmt)
+        trades = list(trade_res.scalars().all())
+
+        if not trades:
+            await memory_cache.set(cache_key, [], ttl=min(settings.CACHE_TTL_SECONDS, 30))
+            return []
+
+        # 2. Group trades by (condition_id, outcome)
+        grouped_trades: dict[tuple[str, str], list[Trade]] = defaultdict(list)
+        market_meta: dict[str, tuple[str | None, str | None]] = {}
+        for t in trades:
+            if not t.condition_id:
+                continue
+            outcome = (t.outcome or "YES").strip().upper()
+            grouped_trades[(t.condition_id, outcome)].append(t)
+            if t.condition_id not in market_meta:
+                market_meta[t.condition_id] = (t.market_title, t.market_slug)
+
+        # 3. Pre-fetch wallets info
+        all_wallet_addrs = list({t.wallet_address for t in trades})
+        wallet_map: dict[str, Wallet] = {}
+        snap_map: dict[str, Snapshot] = {}
+        if all_wallet_addrs:
+            w_res = await db.execute(select(Wallet).where(Wallet.address.in_(all_wallet_addrs)))
+            for w in w_res.scalars().all():
+                wallet_map[w.address] = w
+
+            s_res = await db.execute(
+                select(Snapshot)
+                .where(Snapshot.wallet_address.in_(all_wallet_addrs))
+                .order_by(Snapshot.snapshot_date.desc())
+            )
+            for s in s_res.scalars().all():
+                if s.wallet_address not in snap_map:
+                    snap_map[s.wallet_address] = s
+
+        # 4. Pre-fetch positions for relevant wallets and condition_ids
+        all_condition_ids = list({t.condition_id for t in trades if t.condition_id})
+        pos_map: dict[tuple[str, str, str], Position] = {}
+        if all_wallet_addrs and all_condition_ids:
+            pos_res = await db.execute(
+                select(Position).where(
+                    Position.wallet_address.in_(all_wallet_addrs),
+                    Position.condition_id.in_(all_condition_ids),
+                )
+            )
+            for p in pos_res.scalars().all():
+                p_outcome = (p.outcome or "YES").strip().upper()
+                pos_map[(p.wallet_address, p.condition_id, p_outcome)] = p
+
+        signals: list[WhaleExitSignalResponse] = []
+
+        for (cond_id, outcome), m_trades in grouped_trades.items():
+            total_exit_vol = sum(t.usdc_size for t in m_trades)
+            if total_exit_vol < min_exit_usd:
+                continue
+
+            # Group per whale
+            whale_trades: dict[str, list[Trade]] = defaultdict(list)
+            for t in m_trades:
+                whale_trades[t.wallet_address].append(t)
+
+            distinct_whales_count = len(whale_trades)
+            if distinct_whales_count < min_whales:
+                continue
+
+            first_exit_at = _ensure_utc(min(t.traded_at for t in m_trades))
+            last_exit_at = _ensure_utc(max(t.traded_at for t in m_trades))
+
+            total_shares_sold = sum(t.size for t in m_trades)
+            avg_exit_price = (
+                (total_exit_vol / total_shares_sold)
+                if total_shares_sold > 0
+                else (sum(t.price for t in m_trades) / len(m_trades) if m_trades else 0.0)
+            )
+
+            exiting_whales_list: list[ExitingWhaleDetail] = []
+            for w_addr, w_tlist in whale_trades.items():
+                w_sold_vol = sum(t.usdc_size for t in w_tlist)
+                w_sold_shares = sum(t.size for t in w_tlist)
+                w_avg_price = (
+                    (w_sold_vol / w_sold_shares)
+                    if w_sold_shares > 0
+                    else (sum(t.price for t in w_tlist) / len(w_tlist))
+                )
+
+                # Check remaining position
+                cur_pos = pos_map.get((w_addr, cond_id, outcome))
+                remaining = float(cur_pos.size) if cur_pos and cur_pos.size is not None else 0.0
+                cleared = remaining <= 0.001
+
+                w_obj = wallet_map.get(w_addr)
+                w_label = w_obj.label if w_obj else None
+                snap = snap_map.get(w_addr)
+                w_win_rate = snap.win_rate if snap and snap.win_rate is not None else 0.55
+                w_trade_count = snap.total_trades_count if snap and snap.total_trades_count is not None else len(w_tlist)
+                arch, _ = self._classify_whale_archetype(
+                    win_rate=w_win_rate,
+                    size_usdc=w_sold_vol,
+                    trade_count=w_trade_count,
+                )
+                w_archetype = arch.value
+
+                exiting_whales_list.append(
+                    ExitingWhaleDetail(
+                        address=w_addr,
+                        label=w_label,
+                        sold_volume_usdc=round(w_sold_vol, 2),
+                        sold_shares=round(w_sold_shares, 2),
+                        average_exit_price=round(w_avg_price, 4),
+                        remaining_shares=round(remaining, 2),
+                        is_position_cleared=cleared,
+                        archetype=w_archetype,
+                    )
+                )
+
+            is_full_exit = all(w.is_position_cleared for w in exiting_whales_list)
+
+            # Classify exit_type
+            if distinct_whales_count >= 2:
+                exit_type = ExitTypeEnum.WHALE_EXODUS
+            elif avg_exit_price >= 0.70:
+                exit_type = ExitTypeEnum.PROFIT_TAKING
+            elif avg_exit_price <= 0.30:
+                exit_type = ExitTypeEnum.STOP_LOSS_DUMP
+            else:
+                exit_type = ExitTypeEnum.PARTIAL_TRIM
+
+            # Classify urgency and recommended_action
+            if exit_type == ExitTypeEnum.WHALE_EXODUS:
+                urgency = ExitUrgencyEnum.CRITICAL
+                action = ExitActionEnum.EMERGENCY_CLOSE
+            elif total_exit_vol >= 20000.0 and is_full_exit:
+                urgency = ExitUrgencyEnum.CRITICAL
+                action = ExitActionEnum.EMERGENCY_CLOSE
+            elif exit_type == ExitTypeEnum.STOP_LOSS_DUMP:
+                urgency = ExitUrgencyEnum.HIGH
+                action = ExitActionEnum.EMERGENCY_CLOSE
+            elif exit_type == ExitTypeEnum.PROFIT_TAKING:
+                urgency = ExitUrgencyEnum.HIGH
+                action = ExitActionEnum.TRIM_50
+            else:
+                urgency = ExitUrgencyEnum.MEDIUM
+                action = ExitActionEnum.TIGHTEN_STOP
+
+            # Build AI rationale
+            m_title = market_meta.get(cond_id, (None, None))[0]
+            m_slug = market_meta.get(cond_id, (None, None))[1]
+            title_str = f"'{m_title}'" if m_title else cond_id[:16]
+
+            if urgency == ExitUrgencyEnum.CRITICAL:
+                ai_rationale = (
+                    f"CRITICAL EXIT ALERT: {distinct_whales_count} whale(s) executed major liquidations on {outcome} "
+                    f"in {title_str} totaling ${total_exit_vol:,.0f} USDC within {timeframe}. "
+                    f"{'Full liquidation confirmed (0 remaining shares).' if is_full_exit else 'Heavy capital flight.'} "
+                    f"Immediate exit strongly advised."
+                )
+            elif urgency == ExitUrgencyEnum.HIGH:
+                ai_rationale = (
+                    f"HIGH EXIT WARNING: Whale {exit_type.value} on {outcome} in {title_str} "
+                    f"totaling ${total_exit_vol:,.0f} USDC at avg price ${avg_exit_price:.2f}. "
+                    f"Recommended action: {action.value}."
+                )
+            else:
+                ai_rationale = (
+                    f"MODERATE EXIT ACTIVITY: ${total_exit_vol:,.0f} USDC in {outcome} sells across "
+                    f"{distinct_whales_count} whale(s). Maintain position with tight trailing stops."
+                )
+
+            signals.append(
+                WhaleExitSignalResponse(
+                    condition_id=cond_id,
+                    market_title=m_title,
+                    market_slug=m_slug,
+                    outcome_exited=outcome,
+                    timeframe=timeframe,
+                    exiting_whales_count=distinct_whales_count,
+                    total_exit_volume_usdc=round(total_exit_vol, 2),
+                    average_exit_price=round(avg_exit_price, 4),
+                    exit_type=exit_type,
+                    urgency=urgency,
+                    recommended_action=action,
+                    is_full_exit=is_full_exit,
+                    exiting_whales=exiting_whales_list,
+                    ai_rationale=ai_rationale,
+                    first_exit_at=first_exit_at,
+                    last_exit_at=last_exit_at,
+                )
+            )
+
+        # Sort: highest exit volume first
+        signals.sort(key=lambda x: x.total_exit_volume_usdc, reverse=True)
+        final_signals = signals[:limit]
+        await memory_cache.set(cache_key, final_signals, ttl=min(settings.CACHE_TTL_SECONDS, 30))
+        return final_signals
 
     async def warm_up_cache(self, db: AsyncSession) -> None:
         """Pre-compute consensus signals and portfolio holdings radar into memory cache for instant dashboard access."""
