@@ -1,6 +1,6 @@
 import datetime
 from collections import defaultdict
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import memory_cache
 from app.core.config import settings
@@ -112,17 +112,43 @@ class ConsensusService:
         cutoff = datetime.datetime.now(datetime.timezone.utc) - delta
 
 
-        # 1. Fetch trades within timeframe
+        # 1. Fetch top candidate condition_ids via fast SQL aggregation to avoid massive scans
+        cand_query = (
+            select(
+                Trade.condition_id,
+                func.sum(Trade.usdc_size).label("total_vol"),
+            )
+            .where(
+                Trade.traded_at >= cutoff,
+                Trade.condition_id.isnot(None),
+            )
+            .group_by(Trade.condition_id)
+            .having(
+                func.count(func.distinct(Trade.wallet_address)) >= min_whales,
+            )
+            .order_by(desc("total_vol"))
+            .limit(limit * 3)
+        )
+        cand_res = await db.execute(cand_query)
+        cand_rows = cand_res.all()
+        if not cand_rows:
+            await memory_cache.set(cache_key, [], ttl=settings.CACHE_TTL_SECONDS)
+            return []
+
+        cand_cond_ids = [r[0] for r in cand_rows]
+
+        # 2. Fetch trades ONLY for top candidate condition IDs
         query = (
             select(Trade)
             .where(
                 Trade.traded_at >= cutoff,
-                Trade.condition_id.isnot(None),
+                Trade.condition_id.in_(cand_cond_ids),
             )
             .order_by(Trade.traded_at.asc())
         )
         trade_rows = (await db.execute(query)).scalars().all()
         if not trade_rows:
+            await memory_cache.set(cache_key, [], ttl=settings.CACHE_TTL_SECONDS)
             return []
 
         # 2. Get wallet labels and win rates
@@ -442,15 +468,38 @@ class ConsensusService:
         if cached_result is not None:
             return cached_result
 
-        # 1. Fetch all active positions with size > 0 or cur_value > 0
+        # 1. Fast SQL aggregation to identify top candidate condition_ids by holdings value
+        cand_pos_query = (
+            select(
+                Position.condition_id,
+                func.sum(Position.cur_value).label("total_val"),
+            )
+            .where(Position.condition_id.isnot(None), Position.cur_value > 0.0)
+            .group_by(Position.condition_id)
+            .having(func.count(func.distinct(Position.wallet_address)) >= min_whales)
+            .order_by(desc("total_val"))
+            .limit(limit)
+        )
+        cand_pos_res = await db.execute(cand_pos_query)
+        cand_pos_rows = cand_pos_res.all()
+        if not cand_pos_rows:
+            await memory_cache.set(cache_key, [], ttl=settings.CACHE_TTL_SECONDS)
+            return []
+
+        cand_cond_ids = [r[0] for r in cand_pos_rows]
+
+        # 2. Fetch positions ONLY for top candidate condition_ids
         pos_query = (
             select(Position)
-            .where(Position.condition_id.isnot(None), Position.cur_value > 0.0)
+            .where(
+                Position.condition_id.in_(cand_cond_ids),
+                Position.cur_value > 0.0,
+            )
         )
-
         pos_res = await db.execute(pos_query)
         positions = pos_res.scalars().all()
         if not positions:
+            await memory_cache.set(cache_key, [], ttl=settings.CACHE_TTL_SECONDS)
             return []
 
         # 2. Fetch wallet metadata & snapshots ONLY for active whale addresses
@@ -672,13 +721,41 @@ class ConsensusService:
         now = datetime.datetime.now(datetime.timezone.utc)
         cutoff = now - delta
 
-        # 1. Fetch SELL trades within timeframe
+        # 1. Fast SQL aggregation to identify candidate exit markets
+        cand_query = (
+            select(
+                Trade.condition_id,
+                func.upper(func.coalesce(Trade.outcome, "YES")).label("norm_outcome"),
+                func.sum(Trade.usdc_size).label("total_vol"),
+            )
+            .where(
+                Trade.side == "SELL",
+                Trade.traded_at >= cutoff,
+                Trade.condition_id.isnot(None),
+            )
+            .group_by(Trade.condition_id, func.upper(func.coalesce(Trade.outcome, "YES")))
+            .having(
+                func.sum(Trade.usdc_size) >= min_exit_usd,
+                func.count(func.distinct(Trade.wallet_address)) >= min_whales,
+            )
+            .order_by(desc("total_vol"))
+            .limit(limit)
+        )
+        cand_res = await db.execute(cand_query)
+        cand_rows = cand_res.all()
+        if not cand_rows:
+            await memory_cache.set(cache_key, [], ttl=min(settings.CACHE_TTL_SECONDS, 30))
+            return []
+
+        cand_cond_ids = list({r[0] for r in cand_rows})
+
+        # 2. Fetch SELL trades ONLY for candidate condition IDs
         stmt = (
             select(Trade)
             .where(
                 Trade.side == "SELL",
                 Trade.traded_at >= cutoff,
-                Trade.condition_id.isnot(None),
+                Trade.condition_id.in_(cand_cond_ids),
             )
             .order_by(Trade.traded_at.desc())
         )
@@ -689,7 +766,7 @@ class ConsensusService:
             await memory_cache.set(cache_key, [], ttl=min(settings.CACHE_TTL_SECONDS, 30))
             return []
 
-        # 2. Group trades by (condition_id, outcome)
+        # 3. Group trades by (condition_id, outcome)
         grouped_trades: dict[tuple[str, str], list[Trade]] = defaultdict(list)
         market_meta: dict[str, tuple[str | None, str | None]] = {}
         for t in trades:
@@ -700,7 +777,7 @@ class ConsensusService:
             if t.condition_id not in market_meta:
                 market_meta[t.condition_id] = (t.market_title, t.market_slug)
 
-        # 3. Pre-fetch wallets info
+        # 4. Pre-fetch wallets info ONLY for candidate whales
         all_wallet_addrs = list({t.wallet_address for t in trades})
         wallet_map: dict[str, Wallet] = {}
         snap_map: dict[str, Snapshot] = {}
@@ -718,14 +795,13 @@ class ConsensusService:
                 if s.wallet_address not in snap_map:
                     snap_map[s.wallet_address] = s
 
-        # 4. Pre-fetch positions for relevant wallets and condition_ids
-        all_condition_ids = list({t.condition_id for t in trades if t.condition_id})
+        # 5. Pre-fetch positions ONLY for relevant candidate wallets and condition_ids
         pos_map: dict[tuple[str, str, str], Position] = {}
-        if all_wallet_addrs and all_condition_ids:
+        if all_wallet_addrs and cand_cond_ids:
             pos_res = await db.execute(
                 select(Position).where(
                     Position.wallet_address.in_(all_wallet_addrs),
-                    Position.condition_id.in_(all_condition_ids),
+                    Position.condition_id.in_(cand_cond_ids),
                 )
             )
             for p in pos_res.scalars().all():
@@ -888,7 +964,9 @@ class ConsensusService:
             await self.get_consensus_signals(db=db, timeframe="6h", min_whales=1, min_score=0.0, limit=25)
             await self.get_consensus_signals(db=db, timeframe="1h", min_whales=1, min_score=0.0, limit=25)
             # Pre-compute holdings radar
-            await self.get_portfolio_holdings_consensus(db=db, min_whales=1, limit=30)
+            await self.get_portfolio_holdings_consensus(db=db, min_whales=1, limit=10)
+            # Pre-compute exit radar
+            await self.get_whale_exit_signals(db=db, timeframe="24h", min_exit_usd=1000.0, min_whales=1, limit=10)
             logger.info("Consensus in-memory cache successfully warmed up.")
         except Exception as warm_err:
             logger.warning("Failed to warm up consensus cache: %s", str(warm_err))
