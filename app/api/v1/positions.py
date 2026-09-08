@@ -12,7 +12,7 @@ router = APIRouter(prefix="/positions", tags=["Positions"])
 async def list_positions(
     wallet_address: str | None = Query(None, description="Filter positions by wallet address"),
     outcome: str | None = Query(None, description="Filter by outcome (YES, NO)"),
-    limit: int = Query(100, ge=1, le=500, description="Max records to return"),
+    limit: int = Query(10, ge=1, le=500, description="Max records to return"),
     db: AsyncSession = Depends(get_db),
 ):
     """List open positions across tracked wallets or for a specific wallet."""

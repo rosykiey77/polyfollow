@@ -1,5 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import memory_cache
 from app.core.config import settings
@@ -65,30 +65,39 @@ async def _build_wallet_response(wallet: Wallet, db: AsyncSession, snap: Snapsho
 @router.get("", response_model=list[WalletResponse])
 async def list_wallets(
     active_only: bool = Query(False, description="Filter only active tracked wallets"),
+    limit: int = Query(10, ge=1, le=500, description="Maksimal dompet bandar terbaik yang dikembalikan"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all tracked bandar/whale wallets with performance stats (batch optimized & cached)."""
-    cache_key = f"wallets:list:{active_only}"
+    """List top tracked bandar/whale wallets ranked by performance and volume (batch optimized & cached)."""
+    cache_key = f"wallets:list:{active_only}:{limit}:{offset}"
     cached_data = await memory_cache.get(cache_key)
     if cached_data is not None:
         return cached_data
 
-    query = select(Wallet).order_by(Wallet.created_at.desc())
+    query = (
+        select(Wallet, Snapshot)
+        .outerjoin(Snapshot, Wallet.address == Snapshot.wallet_address)
+    )
     if active_only:
         query = query.where(Wallet.is_active.is_(True))
-    result = await db.execute(query)
-    wallets = result.scalars().all()
 
-    if not wallets:
+    query = (
+        query.order_by(
+            func.coalesce(Snapshot.total_volume_usdc, 0.0).desc(),
+            Wallet.created_at.desc(),
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    if not rows:
         return []
 
-    # Single batch query for snapshots (1 row per wallet)
-    addresses = [w.address for w in wallets]
-    snap_stmt = select(Snapshot).where(Snapshot.wallet_address.in_(addresses))
-    snap_res = await db.execute(snap_stmt)
-    latest_snapshots = {s.wallet_address: s for s in snap_res.scalars().all()}
-
-    responses = [_build_wallet_response_from_snap(w, latest_snapshots.get(w.address)) for w in wallets]
+    responses = [_build_wallet_response_from_snap(wallet, snap) for wallet, snap in rows]
     await memory_cache.set(cache_key, responses, ttl=settings.CACHE_TTL_SECONDS)
     return responses
 

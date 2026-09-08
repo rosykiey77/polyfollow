@@ -18,7 +18,7 @@ async def get_trades_feed(
     unread_only: bool = Query(True, description="Fetch only trades not yet consumed by Hermes Agent"),
     wallet_address: str | None = Query(None, description="Filter by wallet address"),
     since: datetime.datetime | None = Query(None, description="Filter trades after this timestamp (UTC)"),
-    limit: int = Query(50, ge=1, le=200, description="Number of trade records to fetch"),
+    limit: int = Query(10, ge=1, le=200, description="Number of trade records to fetch"),
     db: AsyncSession = Depends(get_db),
 ):
     """

@@ -85,3 +85,43 @@ async def test_wallet_profile_endpoint(async_client: AsyncClient):
     assert "conviction_tier" in pdata
     assert "win_rate" in pdata
     assert "total_volume_usdc" in pdata
+
+
+@pytest.mark.asyncio
+async def test_list_wallets_top10_and_pagination(async_client: AsyncClient, db_session):
+    import uuid
+    from app.models.snapshot import Snapshot
+    from app.models.wallet import Wallet
+
+    # Create 15 wallets with different volumes
+    for i in range(15):
+        addr = f"0x{uuid.uuid4().hex[:40]}"
+        w = Wallet(address=addr, label=f"Rank Whale {i}", is_active=True)
+        s = Snapshot(
+            id=str(uuid.uuid4()),
+            wallet_address=addr,
+            win_rate=0.70,
+            total_volume_usdc=float((i + 1) * 10000),  # whale 14 has $150k volume, highest
+            total_trades_count=10,
+        )
+        db_session.add_all([w, s])
+    await db_session.commit()
+
+    # 1. Default request should return exactly 10 wallets
+    res_default = await async_client.get("/api/v1/wallets")
+    assert res_default.status_code == 200
+    data_default = res_default.json()
+    assert len(data_default) == 10
+
+    # 2. First wallet must be the highest volume ($150,000)
+    assert data_default[0]["total_volume_usdc"] == 150000.0
+
+    # 3. Request with custom limit=5
+    res_limit5 = await async_client.get("/api/v1/wallets?limit=5")
+    assert res_limit5.status_code == 200
+    assert len(res_limit5.json()) == 5
+
+    # 4. Request with offset=10 to fetch remaining
+    res_offset = await async_client.get("/api/v1/wallets?limit=10&offset=10")
+    assert res_offset.status_code == 200
+    assert len(res_offset.json()) >= 5

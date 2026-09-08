@@ -31,7 +31,7 @@ async def get_consensus_signals(
         description="Minimum number of tracked whales agreeing on the same outcome",
     ),
     limit: int = Query(
-        20,
+        10,
         ge=1,
         le=100,
         description="Maximum number of consensus signals to return",
@@ -61,7 +61,7 @@ async def get_holdings_consensus(
         description="Minimum number of tracked whales holding positions in this market",
     ),
     limit: int = Query(
-        30,
+        10,
         ge=1,
         le=100,
         description="Maximum number of market holdings to analyze",
@@ -98,7 +98,7 @@ async def get_whale_exit_signals(
         description="Minimum number of distinct whales selling in this market",
     ),
     limit: int = Query(
-        20,
+        10,
         ge=1,
         le=100,
         description="Maximum number of exit alerts to return",
