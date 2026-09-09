@@ -28,10 +28,15 @@ class Settings(BaseSettings):
     AUTO_DISCOVERY_INTERVAL_RUNS: int = 20
     MAX_NEW_WHALES_PER_DISCOVERY: int = 5
     MAX_WALLETS_PER_CYCLE: int = 20
-    MAX_TRACKED_WALLETS: int = 20
+    MAX_TRACKED_WALLETS: int = 25
     WALLET_SYNC_DELAY_SECONDS: float = 0.5
     REQUEST_TIMEOUT_SECONDS: float = 15.0
     MAX_RETRIES: int = 3
+
+    # Trade Retention & Database Pruning Settings
+    TRADE_RETENTION_DAYS: int = 14
+    PRUNING_INTERVAL_HOURS: int = 24
+    ENABLE_AUTO_PRUNING: bool = True
 
     # In-Memory Cache (For Low-spec VPS optimization)
     CACHE_TTL_SECONDS: int = 300

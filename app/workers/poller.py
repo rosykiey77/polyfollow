@@ -10,6 +10,7 @@ class BackgroundPoller:
     def __init__(self):
         self.is_running: bool = False
         self.last_run_time: datetime.datetime | None = None
+        self.last_prune_time: datetime.datetime | None = None
         self.total_runs: int = 0
         self.error_count: int = 0
         self._task: asyncio.Task | None = None
@@ -26,6 +27,20 @@ class BackgroundPoller:
                 await tracker_service.discover_and_register_whales(session)
         except Exception as err:
             logger.warning("Deferred initial discovery error: %s", str(err))
+
+    async def _maybe_prune_trades(self, session):
+        """Periodically trigger database auto-pruning every PRUNING_INTERVAL_HOURS."""
+        if not settings.ENABLE_AUTO_PRUNING:
+            return
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if self.last_prune_time is None or (now - self.last_prune_time) >= datetime.timedelta(hours=settings.PRUNING_INTERVAL_HOURS):
+            try:
+                logger.info("Triggering scheduled trade auto-pruning cycle...")
+                await tracker_service.prune_old_trades(session)
+                self.last_prune_time = now
+            except Exception as prune_err:
+                logger.warning("Error during scheduled trade auto-pruning: %s", str(prune_err))
 
     async def _poller_loop(self):
         logger.info(
@@ -56,6 +71,9 @@ class BackgroundPoller:
             try:
                 self.last_run_time = datetime.datetime.now(datetime.timezone.utc)
                 async with async_session_factory() as session:
+                    # Periodically run scheduled trade auto-pruning
+                    await self._maybe_prune_trades(session)
+
                     # Periodically run whale discovery
                     if settings.ENABLE_AUTO_DISCOVERY and (self.total_runs > 0) and (self.total_runs % settings.AUTO_DISCOVERY_INTERVAL_RUNS == 0):
                         try:

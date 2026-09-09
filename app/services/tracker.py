@@ -132,13 +132,63 @@ class TrackerService:
         existing_res = await db.execute(select(Wallet.address))
         existing_addresses = {row[0] for row in existing_res.fetchall()}
 
-        newly_registered: list[dict[str, Any]] = []
-        for addr, label in discovered_candidates.items():
-            if addr in existing_addresses:
-                continue
-            if len(newly_registered) >= effective_limit:
-                break
+        # Filter truly new candidates
+        new_candidates = [
+            (addr, label)
+            for addr, label in discovered_candidates.items()
+            if addr not in existing_addresses
+        ][:effective_limit]
 
+        if not new_candidates:
+            logger.info("All %d discovered whales are already tracked.", len(discovered_candidates))
+            return []
+
+        # Enforce MAX_TRACKED_WALLETS quota with smart degradation of passive whales
+        active_res = await db.execute(select(Wallet.address).where(Wallet.is_active.is_(True)))
+        active_count = len(active_res.fetchall())
+        seed_addresses = {w["address"].strip().lower() for w in INITIAL_SEED_WALLETS}
+
+        if (active_count + len(new_candidates)) > settings.MAX_TRACKED_WALLETS:
+            needed_slots = (active_count + len(new_candidates)) - settings.MAX_TRACKED_WALLETS
+            # Find least active wallets: join Wallet with max(Trade.traded_at) and Snapshot.win_rate
+            subq_trade = (
+                select(Trade.wallet_address, func.max(Trade.traded_at).label("last_trade_at"))
+                .group_by(Trade.wallet_address)
+                .subquery()
+            )
+            degradation_query = (
+                select(Wallet)
+                .outerjoin(subq_trade, Wallet.address == subq_trade.c.wallet_address)
+                .outerjoin(Snapshot, Wallet.address == Snapshot.wallet_address)
+                .where(
+                    Wallet.is_active.is_(True),
+                    Wallet.address.notin_(seed_addresses),
+                )
+                .order_by(
+                    subq_trade.c.last_trade_at.asc().nullsfirst(),
+                    Snapshot.win_rate.asc().nullsfirst(),
+                    Wallet.created_at.asc(),
+                )
+                .limit(needed_slots)
+            )
+            degradable_res = await db.execute(degradation_query)
+            wallets_to_degrade = degradable_res.scalars().all()
+            for w in wallets_to_degrade:
+                logger.info(
+                    "Degrading inactive/low-performing whale %s (%s) to is_active=False to free quota slot.",
+                    w.address,
+                    w.label,
+                )
+                w.is_active = False
+                w.updated_at = datetime.datetime.now(datetime.timezone.utc)
+
+            freed_slots = len(wallets_to_degrade)
+            available_slots = settings.MAX_TRACKED_WALLETS - (active_count - freed_slots)
+            if available_slots < len(new_candidates):
+                new_candidates = new_candidates[:max(0, available_slots)]
+
+        newly_registered: list[dict[str, Any]] = []
+        for addr, label in new_candidates:
             wallet = Wallet(address=addr, label=label, is_active=True)
             db.add(wallet)
             newly_registered.append({"address": addr, "label": label})
@@ -154,7 +204,7 @@ class TrackerService:
                 except Exception as sync_err:
                     logger.warning("Initial sync error for newly discovered wallet %s: %s", item["address"], str(sync_err))
         else:
-            logger.info("All %d discovered whales are already tracked.", len(discovered_candidates))
+            logger.info("No slots available to register new whales due to active quota limit.")
 
         return newly_registered
 
@@ -394,6 +444,30 @@ class TrackerService:
 
         return results
 
+    async def prune_old_trades(self, db: AsyncSession, retention_days: int | None = None) -> int:
+        """
+        Delete trades older than the configured retention period (default: settings.TRADE_RETENTION_DAYS).
+        Maintains database lean storage while preserving consensus calculation integrity.
+        Returns the number of deleted trades.
+        """
+        days = retention_days if retention_days is not None else settings.TRADE_RETENTION_DAYS
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+
+        logger.info("Running database auto-pruning for trades older than %d days (cutoff: %s)...", days, cutoff.isoformat())
+        try:
+            stmt = delete(Trade).where(Trade.traded_at < cutoff).execution_options(synchronize_session=False)
+            result = await db.execute(stmt)
+            deleted_count = result.rowcount or 0
+            await db.commit()
+            if deleted_count > 0:
+                logger.info("Database auto-pruning completed: successfully deleted %d expired trades.", deleted_count)
+            else:
+                logger.info("Database auto-pruning completed: 0 expired trades found.")
+            return deleted_count
+        except Exception as e:
+            logger.error("Error executing database auto-pruning: %s", str(e), exc_info=True)
+            await db.rollback()
+            return 0
 
 
 tracker_service = TrackerService()
